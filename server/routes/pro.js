@@ -10,6 +10,8 @@ const { CATEGORIES } = require('../salons');
 const { runAutomations, APP_URL } = require('../notifications');
 const { PLANS, TEMPLATE_PRICING, CURRENCY } = require('../plans');
 const sites = require('../sites');
+const payments = require('../payments');
+const billing = require('../billing');
 const { TEMPLATES, SECTION_KEYS } = require('../templates');
 
 const router = express.Router();
@@ -105,12 +107,47 @@ router.put('/hours', (req, res) => {
   res.json({ ok: true });
 });
 
-router.post('/plan', (req, res) => {
-  const plan = req.body?.plan;
-  if (!PLANS.some((p) => p.id === plan)) throw new HttpError(400, 'Formule inconnue.');
-  // Billing integration point (Stripe Checkout / Billing): see README "Paiements".
-  run('UPDATE salons SET plan = ? WHERE id = ?', plan, req.salon.id);
-  res.json({ ok: true });
+router.post('/plan', async (req, res) => {
+  const plan = PLANS.find((p) => p.id === req.body?.plan);
+  if (!plan) throw new HttpError(400, 'Formule inconnue.');
+  if (!payments.enabled()) {
+    // Demo / simulated mode: the plan switches instantly.
+    billing.activatePlan(req.salon.id, plan.id);
+    return res.json({ ok: true, simulated: true });
+  }
+  const session = await payments.platformCheckout({
+    salon: req.salon, mode: 'subscription', name: `Lumea ${plan.name} — ${req.salon.name}`, amountChf: plan.price,
+    metadata: { kind: 'plan', plan: plan.id, salon_id: String(req.salon.id) },
+    successUrl: `${APP_URL}/app#billing`, cancelUrl: `${APP_URL}/app#billing`,
+  });
+  res.json({ checkout_url: session.url });
+});
+
+// Stripe customer portal: card, invoices, cancellation — handled by Stripe.
+router.post('/billing/portal', async (req, res) => {
+  if (!payments.enabled() || !req.salon.stripe_customer_id) throw new HttpError(400, 'Aucun abonnement payant à gérer pour le moment.');
+  const session = await payments.stripe('POST', '/billing_portal/sessions', { customer: req.salon.stripe_customer_id, return_url: `${APP_URL}/app#billing` });
+  res.json({ url: session.url });
+});
+
+// Stripe Connect: the salon links its own Stripe account to receive deposits directly (0 % commission).
+router.get('/payments', async (req, res) => {
+  let s = req.salon;
+  if (payments.enabled() && s.stripe_account_id) {
+    try {
+      const acct = await payments.retrieveAccount(s.stripe_account_id);
+      run('UPDATE salons SET stripe_charges_enabled = ? WHERE id = ?', acct.charges_enabled ? 1 : 0, s.id);
+      s = one('SELECT * FROM salons WHERE id = ?', s.id);
+    } catch (err) { console.error('[connect]', err.message); }
+  }
+  res.json({ mode: billing.depositMode(s), stripe: payments.enabled(), connected: !!s.stripe_account_id, charges_enabled: !!s.stripe_charges_enabled, active: billing.salonActive(s) });
+});
+
+router.post('/payments/connect', async (req, res) => {
+  if (!payments.enabled()) throw new HttpError(400, 'Les paiements en ligne ne sont pas encore activés sur la plateforme (clé Stripe manquante).');
+  const { account, url } = await payments.connectOnboarding(req.salon, { returnUrl: `${APP_URL}/app#settings`, refreshUrl: `${APP_URL}/app#settings` });
+  run('UPDATE salons SET stripe_account_id = ? WHERE id = ?', account, req.salon.id);
+  res.json({ url });
 });
 
 // ---------- Services ----------
@@ -529,23 +566,36 @@ router.post('/site/preview', (req, res) => {
   }));
 });
 
-router.post('/site/licenses', (req, res) => {
-  const { template, billing } = req.body || {};
+router.post('/site/licenses', async (req, res) => {
+  const { template, billing: mode } = req.body || {};
   const tpl = TEMPLATES.find((t) => t.id === template);
   if (!tpl || tpl.free) throw new HttpError(400, 'Modèle invalide.');
-  if (!['once', 'monthly'].includes(billing)) throw new HttpError(400, 'Mode de paiement invalide.');
+  if (!['once', 'monthly'].includes(mode)) throw new HttpError(400, 'Mode de paiement invalide.');
   if (sites.isPremium(req.salon)) throw new HttpError(400, 'Tous les modèles sont déjà inclus dans votre formule Premium.');
   if (sites.activeLicenses(req.salon.id).some((l) => l.template === template)) throw new HttpError(409, 'Vous disposez déjà de ce modèle.');
-  // Payment integration point (Stripe Checkout: one-off payment or subscription item) — see README.
-  run('INSERT INTO template_licenses (salon_id, template, billing, price_chf) VALUES (?,?,?,?)',
-    req.salon.id, template, billing, TEMPLATE_PRICING[billing]);
-  res.status(201).json({ ok: true });
+  if (!payments.enabled()) {
+    billing.addLicense(req.salon.id, template, mode);
+    return res.status(201).json({ ok: true, simulated: true });
+  }
+  const session = await payments.platformCheckout({
+    salon: req.salon, mode: mode === 'once' ? 'payment' : 'subscription',
+    name: `Modèle de site « ${tpl.name} »${mode === 'once' ? '' : ' (location mensuelle)'}`, amountChf: TEMPLATE_PRICING[mode],
+    metadata: { kind: 'template', template, billing: mode, salon_id: String(req.salon.id) },
+    successUrl: `${APP_URL}/app#site`, cancelUrl: `${APP_URL}/app#site`,
+  });
+  res.json({ checkout_url: session.url });
 });
 
 router.delete('/site/licenses/:id', (req, res) => {
   const l = one('SELECT * FROM template_licenses WHERE id = ? AND salon_id = ? AND active = 1', Number(req.params.id), req.salon.id);
   if (!l) throw new HttpError(404, 'Licence introuvable.');
   if (l.billing !== 'monthly') throw new HttpError(400, 'Un modèle acheté vous appartient définitivement.');
+  if (l.stripe_subscription_id && payments.enabled()) {
+    // Stays active until the end of the paid month; Stripe then sends customer.subscription.deleted.
+    payments.cancelSubscription(l.stripe_subscription_id, { atPeriodEnd: true }).catch((err) => console.error('[billing]', err.message));
+    run("UPDATE template_licenses SET cancelled_at = datetime('now') WHERE id = ?", l.id);
+    return res.json({ ok: true, until_period_end: true });
+  }
   run("UPDATE template_licenses SET active = 0, cancelled_at = datetime('now') WHERE id = ?", l.id);
   res.json({ ok: true });
 });

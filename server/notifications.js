@@ -105,10 +105,11 @@ function notifyWaitlist(salonId, serviceId, date) {
 
 /** Periodic automation: 24h reminders and post-visit review requests. */
 function runAutomations() {
+  require('./billing').releaseUnpaidHolds();
   const now = T.now();
   const in24h = T.addMinutes(now.iso, 24 * 60);
   const due = all(
-    "SELECT id FROM bookings WHERE status = 'confirmed' AND reminder_sent = 0 AND start_at > ? AND start_at <= ?",
+    "SELECT id FROM bookings WHERE status = 'confirmed' AND payment_status != 'pending' AND reminder_sent = 0 AND start_at > ? AND start_at <= ?",
     now.iso, in24h,
   );
   for (const { id } of due) {

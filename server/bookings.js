@@ -55,6 +55,9 @@ function createBooking({ salonId, serviceId, staffId = null, date, time, custome
   const salon = one('SELECT * FROM salons WHERE id = ?', salonId);
   const service = one('SELECT * FROM services WHERE id = ? AND salon_id = ?', Number(serviceId), salonId);
   if (!salon || !service || (!service.active && !force)) throw new HttpError(404, 'Prestation introuvable.');
+  const billing = require('./billing');
+  if (source !== 'pro' && !billing.salonActive(salon)) throw new HttpError(403, 'La réservation en ligne est momentanément indisponible pour ce salon. Merci de le contacter directement.');
+  const mode = source === 'pro' ? 'off' : billing.depositMode(salon);
 
   const id = tx(() => {
     let chosenStaff;
@@ -69,19 +72,24 @@ function createBooking({ salonId, serviceId, staffId = null, date, time, custome
     }
     const clientId = upsertClient(salonId, cust, userId);
     const start = `${date}T${time}`;
-    const deposit = source === 'pro' ? 0 : Math.round((service.price_cents * salon.deposit_percent) / 100);
+    const deposit = mode === 'off' ? 0 : Math.round((service.price_cents * salon.deposit_percent) / 100);
+    // Real deposits hold the slot as "pending" until Stripe confirms payment (released after 30 min otherwise).
+    const pending = mode === 'stripe' && deposit > 0;
     return Number(run(
       `INSERT INTO bookings (salon_id, service_id, staff_id, client_id, user_id, start_at, end_at, price_cents,
-         deposit_cents, paid_cents, source, token, notes)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         deposit_cents, paid_cents, source, token, notes, payment_status)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       salonId, service.id, chosenStaff, clientId, userId, start, T.addMinutes(start, service.duration_min),
-      service.price_cents, deposit, deposit, source, randomToken(), cust.notes,
+      service.price_cents, deposit, pending ? 0 : deposit, source, randomToken(), cust.notes, pending ? 'pending' : 'none',
     ).lastInsertRowid);
   });
 
-  notify('confirmation', id);
-  if (source !== 'pro') notify('new_booking_pro', id);
-  return one('SELECT * FROM bookings WHERE id = ?', id);
+  const booking = one('SELECT * FROM bookings WHERE id = ?', id);
+  if (booking.payment_status !== 'pending') {
+    notify('confirmation', id);
+    if (source !== 'pro') notify('new_booking_pro', id);
+  }
+  return booking;
 }
 
 function cancelBooking(booking, { byClient = false } = {}) {
@@ -93,7 +101,9 @@ function cancelBooking(booking, { byClient = false } = {}) {
     }
   }
   run("UPDATE bookings SET status = 'cancelled' WHERE id = ?", booking.id);
-  notify('cancelled', booking.id);
+  // Cancelled within the allowed window (or by the salon): the deposit goes back to the client.
+  if (booking.payment_status === 'paid') require('./billing').refundDeposit(booking);
+  if (booking.payment_status !== 'pending') notify('cancelled', booking.id);
   notifyWaitlist(booking.salon_id, booking.service_id, booking.start_at.slice(0, 10));
 }
 

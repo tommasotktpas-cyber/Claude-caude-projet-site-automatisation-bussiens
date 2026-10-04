@@ -9,34 +9,40 @@ if (DB_PATH !== ':memory:') fs.mkdirSync(path.dirname(DB_PATH), { recursive: tru
 const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
 
-// Migration v1 -> v2: plans starter/pro/business became essentiel/premium (CHECK constraint must be rebuilt).
-{
-  const legacy = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'salons'").get();
-  if (legacy && legacy.sql.includes("'starter'")) {
-    const cols = db.prepare('PRAGMA table_info(salons)').all().map((c) => c.name);
-    const select = cols.map((c) => (c === 'plan'
-      ? "CASE WHEN plan = 'business' THEN 'premium' WHEN plan IN ('starter','pro') THEN 'essentiel' ELSE plan END"
-      : `"${c}"`)).join(', ');
-    db.exec('PRAGMA foreign_keys = OFF');
-    db.exec('BEGIN');
-    try {
-      // Build-copy-swap (renaming the old table first would rewrite other tables' foreign keys).
-      db.exec(legacy.sql
-        .replace(/CREATE TABLE (IF NOT EXISTS )?"?salons"?/, 'CREATE TABLE salons_v2')
-        .replace("'trial','starter','pro','business'", "'trial','essentiel','premium'"));
-      db.exec(`INSERT INTO salons_v2 (${cols.map((c) => `"${c}"`).join(', ')}) SELECT ${select} FROM salons`);
-      db.exec('DROP TABLE salons');
-      db.exec('ALTER TABLE salons_v2 RENAME TO salons');
-      if (db.prepare('PRAGMA foreign_key_check').all().length) throw new Error('Migration v2 : contrôle des clés étrangères échoué.');
-      db.exec('COMMIT');
-    } catch (err) {
-      db.exec('ROLLBACK');
-      throw err;
-    } finally {
-      db.exec('PRAGMA foreign_keys = ON');
-    }
+/**
+ * Rebuilds a table to change a CHECK constraint (SQLite cannot ALTER one), keeping every row.
+ * Build-copy-swap: renaming the old table first would rewrite other tables' foreign keys.
+ */
+function rebuildTable(table, { from, to, select = {} }) {
+  const current = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+  if (!current || !current.sql.includes(from)) return;
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  const quoted = cols.map((c) => `"${c}"`).join(', ');
+  const exprs = cols.map((c) => select[c] || `"${c}"`).join(', ');
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.exec('BEGIN');
+  try {
+    db.exec(current.sql.replace(new RegExp(`CREATE TABLE (IF NOT EXISTS )?"?${table}"?`), `CREATE TABLE ${table}_rebuild`).replace(from, to));
+    db.exec(`INSERT INTO ${table}_rebuild (${quoted}) SELECT ${exprs} FROM ${table}`);
+    db.exec(`DROP TABLE ${table}`);
+    db.exec(`ALTER TABLE ${table}_rebuild RENAME TO ${table}`);
+    if (db.prepare('PRAGMA foreign_key_check').all().length) throw new Error(`Migration ${table} : contrôle des clés étrangères échoué.`);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
   }
 }
+
+// v2: plans starter/pro/business became essentiel/premium.
+rebuildTable('salons', {
+  from: "'trial','starter','pro','business'", to: "'trial','essentiel','premium'",
+  select: { plan: "CASE WHEN plan = 'business' THEN 'premium' WHEN plan IN ('starter','pro') THEN 'essentiel' ELSE plan END" },
+});
+// v3: staff accounts (employees log in and see their own agenda).
+rebuildTable('users', { from: "'client','pro','admin')", to: "'client','pro','admin','staff')" });
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
@@ -45,7 +51,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   name TEXT NOT NULL,
   phone TEXT,
-  role TEXT NOT NULL CHECK (role IN ('client','pro','admin')),
+  role TEXT NOT NULL CHECK (role IN ('client','pro','admin','staff')),
   loyalty_points INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -245,6 +251,23 @@ CREATE TABLE IF NOT EXISTS password_resets (
   used INTEGER NOT NULL DEFAULT 0
 );
 `);
+
+/** Additive migrations: new nullable / defaulted columns on existing databases. */
+function addColumn(table, column, definition) {
+  if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+addColumn('salons', 'stripe_customer_id', 'TEXT');
+addColumn('salons', 'stripe_subscription_id', 'TEXT');
+addColumn('salons', 'stripe_account_id', 'TEXT');
+addColumn('salons', 'stripe_charges_enabled', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('bookings', 'payment_status', "TEXT NOT NULL DEFAULT 'none'"); // none | pending | paid | refunded
+addColumn('bookings', 'stripe_session_id', 'TEXT');
+addColumn('bookings', 'stripe_payment_intent', 'TEXT');
+addColumn('template_licenses', 'stripe_subscription_id', 'TEXT');
+addColumn('users', 'staff_id', 'INTEGER REFERENCES staff(id) ON DELETE SET NULL');
+db.exec(`CREATE TABLE IF NOT EXISTS stripe_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
 
 /** Runs fn inside an IMMEDIATE transaction (serialises writers — prevents double booking). */
 function tx(fn) {

@@ -27,6 +27,13 @@ async function refreshCtx() {
   ctx.services = services;
 }
 
+/** Plan change: redirects to Stripe Checkout when payments are live, otherwise switches instantly (demo). */
+async function choosePlan(plan) {
+  const r = await api(P('/plan'), { method: 'POST', body: { plan } });
+  if (r.checkout_url) { location.href = r.checkout_url; return false; }
+  return true;
+}
+
 const head = (title, actions = '') => `<div class="page-head"><h1>${esc(title)}</h1><div class="grow"></div>${actions}</div>`;
 const staffById = (id) => ctx.staff.find((s) => s.id === id);
 
@@ -52,7 +59,8 @@ async function renderDashboard() {
     ${head(`Bonjour ${esc(ctx.salon.name)}`, `
       <select id="period" style="width:auto">${[7, 30, 90, 365].map((d) => `<option value="${d}" ${d === days ? 'selected' : ''}>${d === 365 ? '12 mois' : `${d} derniers jours`}</option>`).join('')}</select>
       <button class="btn btn-brand" id="quick-book">+ Rendez-vous</button>`)}
-    ${trialDays !== null ? `<div class="card" style="margin-bottom:16px;background:var(--brand-soft);border-color:transparent"><div class="row between"><span>Essai gratuit : <b>${trialDays} jour${trialDays > 1 ? 's' : ''} restant${trialDays > 1 ? 's' : ''}</b>. Aucune carte requise jusque-là.</span><a class="btn btn-sm btn-brand" href="#billing">Choisir une formule</a></div></div>` : ''}
+    ${trialDays !== null && ctx.salon.trial_ends_at < ctx.today ? `<div class="card" style="margin-bottom:16px;background:var(--danger-soft);border-color:transparent"><div class="row between"><span><b>Votre essai est terminé.</b> La réservation en ligne et votre site sont en pause. Vos données sont conservées.</span><a class="btn btn-sm btn-danger" href="#billing">Réactiver mon compte</a></div></div>`
+      : trialDays !== null ? `<div class="card" style="margin-bottom:16px;background:var(--brand-soft);border-color:transparent"><div class="row between"><span>Essai gratuit : <b>${trialDays} jour${trialDays > 1 ? 's' : ''} restant${trialDays > 1 ? 's' : ''}</b>. Aucune carte requise jusque-là.</span><a class="btn btn-sm btn-brand" href="#billing">Choisir une formule</a></div></div>` : ''}
     <div class="kpis">
       <div class="kpi"><div class="label">Chiffre d’affaires</div><div class="value">${fmt.eur(st.totals.revenue_cents)}</div><div class="sub">${st.totals.bookings} rendez-vous</div></div>
       <div class="kpi"><div class="label">Taux de remplissage</div><div class="value">${st.occupancy} %</div><div class="hbar"><span style="width:${Math.min(100, st.occupancy)}%"></span></div></div>
@@ -325,7 +333,7 @@ function bookingDetail(b, after) {
   modal({
     title: `${b.client_name}`,
     body: `
-      <div class="row" style="margin-bottom:12px"><span class="badge ${st.cls}">${st.label}</span><span class="badge">${{ online: 'Réservé en ligne', widget: 'Via widget site', pro: 'Saisi au salon' }[b.source]}</span>${b.deposit_cents ? `<span class="badge badge-ok">Acompte ${fmt.eur(b.deposit_cents)}</span>` : ''}</div>
+      <div class="row" style="margin-bottom:12px"><span class="badge ${st.cls}">${st.label}</span><span class="badge">${{ online: 'Réservé en ligne', widget: 'Via widget site', pro: 'Saisi au salon' }[b.source]}</span>${b.deposit_cents ? `<span class="badge ${b.payment_status === 'pending' ? 'badge-warn' : b.payment_status === 'refunded' ? '' : 'badge-ok'}">Acompte ${fmt.eur(b.deposit_cents)} · ${{ pending: 'en attente de paiement', paid: 'payé', refunded: 'remboursé', none: 'enregistré' }[b.payment_status] || ''}</span>` : ''}</div>
       <div class="summary">
         <div><span class="muted">Prestation</span><b>${esc(b.service_name)}</b></div>
         <div><span class="muted">Quand</span><span>${fmt.dateTime(b.start_at)} – ${fmt.time(b.end_at)}</span></div>
@@ -682,6 +690,7 @@ async function renderSettings() {
       </form>
       <div class="stack">
         <form class="card" id="hours-form"><h3>Horaires d’ouverture</h3>${hoursEditor(ctx.salonFull.hours, 'open', 'close')}<button class="btn btn-brand" style="margin-top:12px">Enregistrer les horaires</button></form>
+        <div class="card" id="payments-card"><h3>Paiements en ligne (acomptes)</h3><p class="small muted">Chargement…</p></div>
         <div class="card"><h3>Partager & intégrer</h3>
           <div class="field"><label>Lien de réservation (Instagram, Google, SMS)</label><div class="row" style="flex-wrap:nowrap"><input readonly value="${esc(links.page)}" id="l-page"><button class="btn btn-ghost btn-sm" data-copy="l-page">Copier</button></div></div>
           <div class="field"><label>Widget pour votre site web</label><code class="block" id="l-widget">${esc(links.widget)}</code><button class="btn btn-ghost btn-sm" style="margin-top:8px" data-copy="l-widget">Copier le code</button></div>
@@ -696,6 +705,19 @@ async function renderSettings() {
     f.published = !!f.published;
     try { await api(P('/salon'), { method: 'PUT', body: f }); toast('Paramètres enregistrés.'); await refreshCtx(); } catch (err) { toast(err.message, 'error'); }
   };
+  api(P('/payments')).then((p) => {
+    const card = $('#payments-card');
+    if (!card) return;
+    const status = {
+      simulated: '<span class="badge badge-warn">Mode démonstration</span><p class="small muted">Les acomptes sont enregistrés mais aucun paiement réel n’est encaissé (clé Stripe non configurée sur la plateforme).</p>',
+      off: '<span class="badge">Non connecté</span><p class="small muted">Connectez votre compte Stripe pour encaisser les acomptes directement sur votre compte bancaire. <b>Lumea ne prend aucune commission</b> : seuls les frais Stripe s’appliquent (≈ 2,9 % + 0.30 CHF par carte, TWINT ≈ 1,3 %).</p>',
+      stripe: '<span class="badge badge-ok">● Actif</span><p class="small muted">Les acomptes sont payés par carte, TWINT, Apple Pay ou Google Pay et versés directement sur votre compte. Remboursement automatique si le client annule dans les délais.</p>',
+    }[p.mode];
+    card.innerHTML = `<h3>Paiements en ligne (acomptes)</h3>${status}${p.stripe && p.mode !== 'stripe' ? `<button class="btn btn-brand btn-sm" id="connect-stripe">${p.connected ? 'Terminer la configuration Stripe' : 'Connecter mon compte Stripe'}</button>` : ''}`;
+    $('#connect-stripe')?.addEventListener('click', async () => {
+      try { location.href = (await api(P('/payments/connect'), { method: 'POST', body: {} })).url; } catch (err) { toast(err.message, 'error'); }
+    });
+  }).catch(() => {});
   $('#hours-form').onsubmit = async (e) => {
     e.preventDefault();
     try { await api(P('/hours'), { method: 'PUT', body: { hours: readHours(e.target) } }); toast('Horaires enregistrés.'); } catch (err) { toast(err.message, 'error'); }
@@ -726,12 +748,17 @@ async function renderBilling() {
         <ul>${p.features.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>
         <button class="btn ${p.id === s.plan ? 'btn-ghost' : 'btn-brand'} btn-block" data-plan="${p.id}" ${p.id === s.plan ? 'disabled' : ''}>${p.id === s.plan ? 'Formule active' : 'Choisir'}</button>
       </div>`).join('')}</div>
+    ${s.stripe_customer_id ? '<button class="btn btn-ghost" id="billing-portal" style="margin-top:14px">Factures, carte bancaire et résiliation</button>' : ''}
     <p class="small muted" style="margin-top:14px">Facturation mensuelle, résiliable à tout moment. Modèles de site premium : gérés dans <a href="#site">Mon site</a>. Le paiement par carte (Stripe) s’active en production — voir README.</p>`;
+  $('#billing-portal')?.addEventListener('click', async () => {
+    try { location.href = (await api(P('/billing/portal'), { method: 'POST', body: {} })).url; } catch (err) { toast(err.message, 'error'); }
+  });
   view.querySelectorAll('[data-plan]').forEach((b) => {
     b.onclick = async () => {
-      await api(P('/plan'), { method: 'POST', body: { plan: b.dataset.plan } });
-      toast('Formule mise à jour.');
-      renderBilling();
+      b.disabled = true;
+      try {
+        if (await choosePlan(b.dataset.plan)) { toast('Formule mise à jour.'); renderBilling(); }
+      } catch (err) { toast(err.message, 'error'); b.disabled = false; }
     };
   });
 }
@@ -821,7 +848,7 @@ function unlockTemplate(t) {
       <p class="small muted" style="margin-top:14px">Ou passez en <b>Premium (158 ${currency} / mois)</b> : tous les modèles, un site personnalisé par notre équipe et votre nom de domaine.</p>`,
     actions: [
       { id: 'close', label: 'Plus tard', cls: 'btn-ghost' },
-      { id: 'premium', label: 'Passer Premium', cls: 'btn-ghost', handler: async () => { await api(P('/plan'), { method: 'POST', body: { plan: 'premium' } }); toast('Formule Premium activée : tous les modèles sont inclus.'); setTimeout(saveSite, 50); } },
+      { id: 'premium', label: 'Passer Premium', cls: 'btn-ghost', handler: async () => { if (await choosePlan('premium')) { toast('Formule Premium activée : tous les modèles sont inclus.'); setTimeout(saveSite, 50); } } },
       { id: 'monthly', label: `Louer ${pricing.monthly} ${currency}/mois`, cls: 'btn-ghost', handler: () => buyLicense(t.id, 'monthly') },
       { id: 'once', label: `Acheter ${pricing.once} ${currency}`, cls: 'btn-brand', handler: () => buyLicense(t.id, 'once') },
     ],
@@ -829,7 +856,11 @@ function unlockTemplate(t) {
 }
 
 async function buyLicense(template, billing) {
-  await api(P('/site/licenses'), { method: 'POST', body: { template, billing } });
+  // Save the draft first so the chosen texts survive the round-trip to the payment page.
+  const saved = { ...siteState.draft, template: siteState.data.site.template };
+  await api(P('/site'), { method: 'PUT', body: saved }).catch(() => {});
+  const r = await api(P('/site/licenses'), { method: 'POST', body: { template, billing } });
+  if (r.checkout_url) { location.href = r.checkout_url; return; }
   toast(billing === 'once' ? 'Modèle acheté.' : 'Modèle loué.');
   const fresh = await api(P('/site'));
   siteState.data.templates = fresh.templates;
@@ -919,7 +950,7 @@ function renderSitePanel() {
       <button class="btn btn-ghost" id="send-brief" style="margin-top:10px" ${locked ? 'disabled' : ''}>Envoyer ma demande</button>
       ${data.design_requests.map((r) => `<div class="list-item small"><div class="grow">${esc(r.brief.slice(0, 120))}${r.admin_note ? `<div class="muted">Réponse : ${esc(r.admin_note)}</div>` : ''}</div><span class="badge ${r.status === 'livre' ? 'badge-ok' : r.status === 'en_cours' ? 'badge-brand' : ''}">${{ nouveau: 'Reçue', en_cours: 'En cours', livre: 'Livrée' }[r.status]}</span></div>`).join('')}
     </div>`;
-    $('#go-premium')?.addEventListener('click', async () => { await api(P('/plan'), { method: 'POST', body: { plan: 'premium' } }); toast('Formule Premium activée.'); renderSiteEditor(); });
+    $('#go-premium')?.addEventListener('click', async () => { if (await choosePlan('premium')) { toast('Formule Premium activée.'); renderSiteEditor(); } });
     $('#send-brief')?.addEventListener('click', async () => {
       try {
         await api(P('/site/design-requests'), { method: 'POST', body: { brief: $('#design-brief').value } });

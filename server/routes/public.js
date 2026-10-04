@@ -6,6 +6,23 @@ const { getSlots, nextAvailableDays } = require('../availability');
 const { createBooking, cancelBooking, rescheduleBooking, HttpError, clean, EMAIL_RE } = require('../bookings');
 const { rateLimit } = require('../auth');
 const { buildIcs } = require('../ics');
+const payments = require('../payments');
+const billing = require('../billing');
+const { APP_URL } = require('../notifications');
+
+/** Opens a Stripe Checkout for a booking's deposit (charged on the salon's own Stripe account). */
+async function depositSession(booking) {
+  const salon = one('SELECT * FROM salons WHERE id = ?', booking.salon_id);
+  const service = one('SELECT name FROM services WHERE id = ?', booking.service_id);
+  const client = one('SELECT email FROM clients WHERE id = ?', booking.client_id);
+  const session = await payments.depositCheckout({
+    salon, booking, serviceName: service.name, customerEmail: client.email,
+    successUrl: `${APP_URL}/rdv.html?t=${booking.token}&paid=1`,
+    cancelUrl: `${APP_URL}/rdv.html?t=${booking.token}&paid=0`,
+  });
+  run('UPDATE bookings SET stripe_session_id = ? WHERE id = ?', session.id, booking.id);
+  return session.url;
+}
 
 const router = express.Router();
 
@@ -19,7 +36,12 @@ function salonBySlug(slug) {
 }
 
 function publicSalon(s) {
-  const { ical_token, owner_id, trial_ends_at, plan, ...rest } = s;
+  const {
+    ical_token, owner_id, trial_ends_at, plan, stripe_customer_id, stripe_subscription_id, stripe_account_id, stripe_charges_enabled, ...rest
+  } = s;
+  // Deposits are only announced when they can actually be collected.
+  if (billing.depositMode(s) === 'off') rest.deposit_percent = 0;
+  rest.online_booking = billing.salonActive(s);
   return rest;
 }
 
@@ -98,7 +120,7 @@ router.get('/salons/:slug/next', (req, res) => {
   res.json(nextAvailableDays({ salonId: salon.id, serviceId: Number(req.query.service), staffId: req.query.staff ? Number(req.query.staff) : null, from, days: 21, limit: 6 }));
 });
 
-router.post('/salons/:slug/bookings', rateLimit('book', 20, 10 * 60 * 1000), (req, res) => {
+router.post('/salons/:slug/bookings', rateLimit('book', 20, 10 * 60 * 1000), async (req, res) => {
   const salon = salonBySlug(req.params.slug);
   const b = req.body || {};
   const booking = createBooking({
@@ -111,6 +133,14 @@ router.post('/salons/:slug/bookings', rateLimit('book', 20, 10 * 60 * 1000), (re
     userId: req.user?.id ?? null,
     source: b.source === 'widget' ? 'widget' : 'online',
   });
+  if (booking.payment_status === 'pending') {
+    try {
+      return res.status(201).json({ token: booking.token, id: booking.id, checkout_url: await depositSession(booking) });
+    } catch (err) {
+      run("UPDATE bookings SET status = 'cancelled', payment_status = 'none' WHERE id = ?", booking.id);
+      throw new HttpError(502, 'Le paiement de l’acompte est momentanément indisponible. Réessayez dans un instant.');
+    }
+  }
   res.status(201).json({ token: booking.token, id: booking.id });
 });
 
@@ -136,7 +166,7 @@ function bookingByToken(token) {
 router.get('/bookings/:token', (req, res) => {
   const b = bookingByToken(req.params.token);
   const detail = one(
-    `SELECT b.id, b.token, b.start_at, b.end_at, b.status, b.price_cents, b.deposit_cents, b.paid_cents, b.notes,
+    `SELECT b.id, b.token, b.start_at, b.end_at, b.status, b.price_cents, b.deposit_cents, b.paid_cents, b.notes, b.payment_status,
             s.name AS salon_name, s.slug AS salon_slug, s.address, s.city, s.phone AS salon_phone, s.cancel_hours, s.accent,
             sv.id AS service_id, sv.name AS service_name, sv.duration_min, st.id AS staff_id, st.name AS staff_name, c.name AS client_name,
             (SELECT rating FROM reviews WHERE booking_id = b.id) AS review_rating
@@ -153,6 +183,24 @@ router.get('/bookings/:token/slots', (req, res) => {
   const b = bookingByToken(req.params.token);
   const out = getSlots({ salonId: b.salon_id, serviceId: b.service_id, date: String(req.query.date), excludeBookingId: b.id });
   res.json({ slots: out.slots.map((s) => s.time), reason: out.reason });
+});
+
+// Back from Stripe Checkout: confirm the deposit without waiting for the webhook.
+router.post('/bookings/:token/confirm-payment', async (req, res) => {
+  const b = bookingByToken(req.params.token);
+  if (b.payment_status === 'pending' && b.stripe_session_id && payments.enabled()) {
+    const salon = one('SELECT stripe_account_id FROM salons WHERE id = ?', b.salon_id);
+    const session = await payments.retrieveSession(b.stripe_session_id, salon.stripe_account_id);
+    if (session.payment_status === 'paid') billing.markDepositPaid(b.id, session.payment_intent);
+  }
+  res.json({ payment_status: one('SELECT payment_status FROM bookings WHERE id = ?', b.id).payment_status });
+});
+
+// Retry paying a deposit (e.g. card declined, window closed) while the slot is still held.
+router.post('/bookings/:token/pay', async (req, res) => {
+  const b = bookingByToken(req.params.token);
+  if (b.payment_status !== 'pending' || b.status !== 'confirmed') throw new HttpError(400, 'Aucun paiement en attente pour ce rendez-vous.');
+  res.json({ checkout_url: await depositSession(b) });
 });
 
 router.post('/bookings/:token/cancel', (req, res) => {

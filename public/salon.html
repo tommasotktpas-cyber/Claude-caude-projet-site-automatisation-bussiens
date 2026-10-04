@@ -79,7 +79,7 @@
                       <div class="info"><div class="name">${esc(sv.name)}</div>
                         <div class="meta">${fmt.duration(sv.duration_min)}${sv.description ? ` · ${esc(sv.description)}` : ''}</div></div>
                       <div class="price">${fmt.eur(sv.price_cents)}</div>
-                      <button class="btn btn-sm btn-brand" data-book="${sv.id}">Choisir</button>
+                      ${s.online_booking ? `<button class="btn btn-sm btn-brand" data-book="${sv.id}">Choisir</button>` : ''}
                     </div>`).join('')}
                 </div></div>`).join('') || '<p class="muted">Aucune prestation en ligne pour le moment.</p>'}
             </section>
@@ -101,7 +101,7 @@
 
           <aside>
             <div class="card side-card stack">
-              <button class="btn btn-brand btn-lg btn-block" data-book="">Prendre rendez-vous</button>
+              ${s.online_booking ? '<button class="btn btn-brand btn-lg btn-block" data-book="">Prendre rendez-vous</button>' : `<div class="card" style="background:var(--warn-soft);border:0"><b>Réservation en ligne indisponible</b><p class="small" style="margin:4px 0 0">Contactez le salon${s.phone ? ` au ${esc(s.phone)}` : ''}.</p></div>`}
               <div>
                 <h3 style="font-size:1rem;margin-top:8px">Horaires</h3>
                 <div class="hours-list">
@@ -293,6 +293,12 @@
           method: 'POST',
           body: { service_id: bk.service.id, staff_id: bk.staff, date: bk.date, time: bk.time, source: embed ? 'widget' : 'online', customer: { ...f, marketing: !!f.marketing } },
         });
+        if (res.checkout_url) {
+          // Deposit: secure payment page (cards, TWINT, Apple / Google Pay). Checkout cannot run inside an iframe.
+          btn.textContent = 'Redirection vers le paiement sécurisé…';
+          try { window.top.location.href = res.checkout_url; } catch { window.open(res.checkout_url, '_blank'); }
+          return;
+        }
         showSuccess(res.token);
       } catch (err) {
         toast(err.message, 'error');

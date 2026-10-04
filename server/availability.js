@@ -49,6 +49,7 @@ function getSlots({ salonId, serviceId, date, staffId = null, excludeBookingId =
   const salon = one('SELECT * FROM salons WHERE id = ?', salonId);
   const service = one('SELECT * FROM services WHERE id = ? AND salon_id = ? AND active = 1', serviceId, salonId);
   if (!salon || !service) return { slots: [], reason: 'Prestation introuvable.' };
+  if (!ignoreNotice && !require('./billing').salonActive(salon)) return { slots: [], reason: 'Réservation en ligne momentanément indisponible. Contactez le salon.' };
   if (!T.isDate(date)) return { slots: [], reason: 'Date invalide.' };
 
   const now = T.now();

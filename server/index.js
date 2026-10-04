@@ -22,6 +22,18 @@ function createApp() {
     if (!(req.path === '/salon.html' && req.query.embed === '1')) res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     next();
   });
+  // Stripe webhooks need the raw body for signature verification.
+  app.post('/api/stripe/webhook', express.raw({ type: '*/*', limit: '1mb' }), async (req, res) => {
+    const payments = require('./payments');
+    const raw = req.body.toString('utf8');
+    if (!payments.verifyWebhook(raw, req.headers['stripe-signature'])) return res.status(400).json({ error: 'Signature invalide.' });
+    try {
+      res.json({ received: await require('./billing').handleStripeEvent(JSON.parse(raw)) });
+    } catch (err) {
+      console.error('[stripe webhook]', err);
+      res.status(500).json({ error: 'Traitement impossible.' });
+    }
+  });
   app.use((req, res, next) => (req.path === '/api/pro/clients/import' ? next() : express.json({ limit: '100kb' })(req, res, next)));
   app.use(sessionMiddleware);
 
