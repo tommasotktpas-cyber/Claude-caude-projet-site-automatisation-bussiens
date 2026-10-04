@@ -2,7 +2,7 @@
 const express = require('express');
 const { one, all, run, tx } = require('../db');
 const T = require('../time');
-const { requireRole } = require('../auth');
+const { requireRole, hashPassword } = require('../auth');
 const { getSlots } = require('../availability');
 const { createBooking, rescheduleBooking, setStatus, HttpError, clean, EMAIL_RE } = require('../bookings');
 const { randomToken } = require('../auth');
@@ -15,8 +15,25 @@ const billing = require('../billing');
 const { TEMPLATES, SECTION_KEYS } = require('../templates');
 
 const router = express.Router();
-router.use(requireRole('pro', 'admin'));
+router.use(requireRole('pro', 'admin', 'staff'));
+
+// Employees (role "staff") only reach their own agenda, bookings and the client file.
+const STAFF_ALLOWED = [
+  ['GET', /^\/(salon|staff|services|agenda|slots|clients(\/\d+)?)$/],
+  ['POST', /^\/bookings$/],
+  ['PATCH', /^\/bookings\/\d+$/],
+  ['PUT', /^\/clients\/\d+$/],
+];
+
 router.use((req, _res, next) => {
+  if (req.user.role === 'staff') {
+    const staff = one('SELECT * FROM staff WHERE id = ? AND active = 1', req.user.staff_id);
+    if (!staff) throw new HttpError(403, 'Votre accès a été désactivé. Contactez le gérant du salon.');
+    if (!STAFF_ALLOWED.some(([m, re]) => m === req.method && re.test(req.path))) throw new HttpError(403, 'Réservé au gérant du salon.');
+    req.staffId = staff.id;
+    req.salon = one('SELECT * FROM salons WHERE id = ?', staff.salon_id);
+    return next();
+  }
   const salonId = req.user.role === 'admin' && req.query.salon ? Number(req.query.salon) : null;
   req.salon = salonId
     ? one('SELECT * FROM salons WHERE id = ?', salonId)
@@ -45,7 +62,7 @@ function validHours(list) {
 
 function ownBooking(req) {
   const b = one('SELECT * FROM bookings WHERE id = ? AND salon_id = ?', Number(req.params.id), req.salon.id);
-  if (!b) throw new HttpError(404, 'Rendez-vous introuvable.');
+  if (!b || (req.staffId && b.staff_id !== req.staffId)) throw new HttpError(404, 'Rendez-vous introuvable.');
   return b;
 }
 
@@ -59,6 +76,10 @@ function ownStaff(req, id = req.params.id) {
 
 router.get('/salon', (req, res) => {
   const s = req.salon;
+  if (req.staffId) {
+    const { ical_token, stripe_customer_id, stripe_subscription_id, stripe_account_id, ...safe } = s;
+    return res.json({ salon: safe, hours: all('SELECT weekday, open, close FROM opening_hours WHERE salon_id = ? ORDER BY weekday, open', s.id), categories: CATEGORIES, plans: [], links: {}, me: { staff_id: req.staffId } });
+  }
   res.json({
     salon: s,
     hours: all('SELECT weekday, open, close FROM opening_hours WHERE salon_id = ? ORDER BY weekday, open', s.id),
@@ -209,6 +230,7 @@ router.get('/staff', (req, res) => {
     hours: all('SELECT weekday, start, end FROM staff_hours WHERE staff_id = ? ORDER BY weekday, start', s.id),
     service_ids: all('SELECT service_id FROM staff_services WHERE staff_id = ?', s.id).map((r) => r.service_id),
     time_off: all('SELECT * FROM time_off WHERE staff_id = ? AND end_at >= ? ORDER BY start_at', s.id, T.now().iso),
+    access: req.staffId ? undefined : one("SELECT email FROM users WHERE role = 'staff' AND staff_id = ?", s.id)?.email || null,
   })));
 });
 
@@ -262,6 +284,36 @@ router.put('/staff/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// Employee login: invite by e-mail (link to choose a password, valid 7 days).
+router.post('/staff/:id/access', (req, res) => {
+  const s = ownStaff(req);
+  const email = clean(req.body?.email, 160).toLowerCase();
+  if (!EMAIL_RE.test(email)) throw new HttpError(400, 'Adresse e-mail invalide.');
+  const existing = one('SELECT * FROM users WHERE email = ?', email);
+  if (existing && !(existing.role === 'staff' && existing.staff_id === s.id)) throw new HttpError(409, 'Cet e-mail est déjà utilisé par un autre compte.');
+  const token = randomToken(24);
+  tx(() => {
+    run("DELETE FROM users WHERE role = 'staff' AND staff_id = ? AND email != ?", s.id, email);
+    if (!existing) {
+      run("INSERT INTO users (email, password_hash, name, role, staff_id) VALUES (?,?,?, 'staff', ?)", email, hashPassword(randomToken(24)), s.name, s.id);
+    }
+    const uid = one('SELECT id FROM users WHERE email = ?', email).id;
+    run('INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES (?,?,?)',
+      require('node:crypto').createHash('sha256').update(token).digest('hex'), uid, Date.now() + 7 * 24 * 3600 * 1000);
+  });
+  const inviteUrl = `${APP_URL}/reset.html?t=${token}`;
+  const body = `Bonjour ${s.name},\n\n${req.salon.name} vous donne accès à votre agenda sur Lumea.\nChoisissez votre mot de passe ici (lien valable 7 jours) :\n${inviteUrl}\n\nEnsuite, connectez-vous sur ${APP_URL}/connexion avec ${email}.`;
+  run("INSERT INTO notifications (salon_id, kind, channel, recipient, subject, body) VALUES (?, 'staff_invite', 'email', ?, ?, ?)", req.salon.id, email, `Votre accès Lumea — ${req.salon.name}`, body);
+  require('../mailer').send({ channel: 'email', to: email, subject: `Votre accès Lumea — ${req.salon.name}`, body, fromName: req.salon.name });
+  res.status(201).json({ ok: true, invite_url: inviteUrl });
+});
+
+router.delete('/staff/:id/access', (req, res) => {
+  const s = ownStaff(req);
+  run("DELETE FROM users WHERE role = 'staff' AND staff_id = ?", s.id);
+  res.json({ ok: true });
+});
+
 router.post('/staff/:id/time-off', (req, res) => {
   const s = ownStaff(req);
   const { start_at, end_at, reason } = req.body || {};
@@ -287,8 +339,8 @@ router.get('/agenda', (req, res) => {
       `SELECT b.*, sv.name AS service_name, st.name AS staff_name, st.color AS staff_color,
               c.name AS client_name, c.phone AS client_phone, c.email AS client_email
        FROM bookings b JOIN services sv ON sv.id = b.service_id JOIN staff st ON st.id = b.staff_id JOIN clients c ON c.id = b.client_id
-       WHERE b.salon_id = ? AND b.start_at >= ? AND b.start_at < ? ORDER BY b.start_at`,
-      req.salon.id, `${from}T00:00`, `${T.addDays(to, 1)}T00:00`,
+       WHERE b.salon_id = ? AND b.start_at >= ? AND b.start_at < ? AND (? = 0 OR b.staff_id = ?) ORDER BY b.start_at`,
+      req.salon.id, `${from}T00:00`, `${T.addDays(to, 1)}T00:00`, req.staffId || 0, req.staffId || 0,
     ),
     time_off: all(
       `SELECT t.*, s.name AS staff_name FROM time_off t JOIN staff s ON s.id = t.staff_id
@@ -310,6 +362,7 @@ router.get('/slots', (req, res) => {
 
 router.post('/bookings', (req, res) => {
   const b = req.body || {};
+  if (req.staffId) b.staff_id = req.staffId;
   const booking = createBooking({
     salonId: req.salon.id, serviceId: b.service_id, staffId: b.staff_id ? Number(b.staff_id) : null,
     date: b.date, time: b.time, customer: b.customer, source: 'pro', force: !!b.force,
@@ -320,6 +373,7 @@ router.post('/bookings', (req, res) => {
 router.patch('/bookings/:id', (req, res) => {
   const booking = ownBooking(req);
   const b = req.body || {};
+  if (req.staffId) b.staff_id = req.staffId;
   if (b.date && b.time) rescheduleBooking(booking, { date: b.date, time: b.time, staffId: b.staff_id ? Number(b.staff_id) : null });
   if (b.status && b.status !== booking.status) setStatus(one('SELECT * FROM bookings WHERE id = ?', booking.id), b.status);
   if (b.notes !== undefined) run('UPDATE bookings SET notes = ? WHERE id = ?', clean(b.notes, 500), booking.id);

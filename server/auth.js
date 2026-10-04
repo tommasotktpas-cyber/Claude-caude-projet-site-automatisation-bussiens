@@ -77,7 +77,7 @@ function clearSession(res) {
 /** Attaches req.user (or null) from the session cookie. */
 function sessionMiddleware(req, _res, next) {
   const data = readSessionToken(parseCookies(req.headers.cookie)[COOKIE]);
-  req.user = data ? one('SELECT id, email, name, phone, role, loyalty_points FROM users WHERE id = ?', data.uid) || null : null;
+  req.user = data ? one('SELECT id, email, name, phone, role, loyalty_points, staff_id FROM users WHERE id = ?', data.uid) || null : null;
   next();
 }
 

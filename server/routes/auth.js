@@ -103,7 +103,9 @@ router.post('/logout', (_req, res) => {
 
 router.get('/me', (req, res) => {
   if (!req.user) return res.json({ user: null });
-  const salon = req.user.role === 'pro' ? one('SELECT id, slug, name FROM salons WHERE owner_id = ?', req.user.id) : null;
+  const salon = req.user.role === 'pro' ? one('SELECT id, slug, name FROM salons WHERE owner_id = ?', req.user.id)
+    : req.user.role === 'staff' ? one('SELECT s.id, s.slug, s.name FROM salons s JOIN staff st ON st.salon_id = s.id JOIN users u ON u.staff_id = st.id WHERE u.id = ?', req.user.id)
+      : null;
   res.json({ user: req.user, salon });
 });
 

@@ -160,6 +160,11 @@ function seed() {
         run('INSERT INTO template_licenses (salon_id, template, billing, price_chf) VALUES (?,?,?,?)', salon.id, def.template, def.license, TEMPLATE_PRICING[def.license]);
       }
 
+      if (idx === 0) {
+        // Demo employee account (sees only Hugo's agenda).
+        const hugo = one("SELECT id FROM staff WHERE salon_id = ? AND name LIKE 'Hugo%'", salon.id);
+        run("INSERT INTO users (email, password_hash, name, role, staff_id) VALUES ('hugo@lumea.app', ?, 'Hugo Martin', 'staff', ?)", demoPassword, hugo.id);
+      }
       const services = all('SELECT * FROM services WHERE salon_id = ?', salon.id);
       const staff = all('SELECT id FROM staff WHERE salon_id = ?', salon.id).map((s) => s.id);
       const hours = all('SELECT * FROM opening_hours WHERE salon_id = ?', salon.id);

@@ -19,11 +19,13 @@ $('#logout').onclick = async (e) => {
   location.href = '/';
 };
 
+const STAFF_ROUTES = ['agenda', 'clients'];
+
 async function refreshCtx() {
   const [s, staff, services] = await Promise.all([api(P('/salon')), api(P('/staff')), api(P('/services'))]);
   ctx.salon = s.salon;
   ctx.salonFull = s;
-  ctx.staff = staff;
+  ctx.staff = s.me ? staff.filter((m) => m.id === s.me.staff_id) : staff;
   ctx.services = services;
 }
 
@@ -534,11 +536,13 @@ async function renderTeam() {
         <div class="row"><span class="avatar" style="--c:${esc(s.color)}">${esc(fmt.initials(s.name))}</span><div class="grow"><b>${esc(s.name)}</b><div class="small muted">${esc(s.title)}</div></div>${s.active ? '' : '<span class="badge">Inactif</span>'}</div>
         <div class="small muted" style="margin-top:12px">${[1, 2, 3, 4, 5, 6, 0].map((wd) => { const h = s.hours.filter((x) => x.weekday === wd); return h.length ? `${WEEKDAYS[wd].slice(0, 3)}. ${h[0].start}–${h[h.length - 1].end}` : ''; }).filter(Boolean).join(' · ') || 'Aucun horaire'}</div>
         <div class="small" style="margin-top:8px">${s.service_ids.length} prestation(s) · ${s.time_off.length} absence(s) prévue(s)</div>
-        <div class="row" style="margin-top:14px"><button class="btn btn-ghost btn-sm" data-edit="${s.id}">Modifier</button><button class="btn btn-ghost btn-sm" data-off="${s.id}">Absences</button></div>
+        <div class="row" style="margin-top:14px"><button class="btn btn-ghost btn-sm" data-edit="${s.id}">Modifier</button><button class="btn btn-ghost btn-sm" data-off="${s.id}">Absences</button><button class="btn btn-ghost btn-sm" data-access="${s.id}">${s.access ? 'Accès ✓' : 'Donner un accès'}</button></div>
+        ${s.access ? `<div class="small muted" style="margin-top:8px">Connexion : ${esc(s.access)}</div>` : ''}
       </div>`).join('')}</div>`;
   $('#add-staff').onclick = () => staffForm();
   view.querySelectorAll('[data-edit]').forEach((b) => { b.onclick = () => staffForm(staffById(Number(b.dataset.edit))); });
   view.querySelectorAll('[data-off]').forEach((b) => { b.onclick = () => timeOffForm(staffById(Number(b.dataset.off))); });
+  view.querySelectorAll('[data-access]').forEach((b) => { b.onclick = () => staffAccess(staffById(Number(b.dataset.access))); });
 }
 
 function staffForm(s = null) {
@@ -570,6 +574,28 @@ function staffForm(s = null) {
         renderTeam();
       },
     }],
+  });
+}
+
+function staffAccess(s) {
+  modal({
+    title: `Accès employé — ${s.name}`,
+    body: `<p class="small">${esc(s.name)} pourra se connecter pour voir <b>son propre agenda</b>, ajouter ou déplacer ses rendez-vous et consulter les fiches clients. Pas d’accès au chiffre d’affaires, aux réglages ni à l’abonnement.</p>
+      <div class="field"><label>E-mail de ${esc(s.name.split(' ')[0])}</label><input id="acc-email" type="email" value="${esc(s.access || '')}" placeholder="prenom@exemple.ch"></div>
+      <div id="acc-result"></div>`,
+    actions: [
+      { id: 'close', label: 'Fermer', cls: 'btn-ghost' },
+      ...(s.access ? [{ id: 'revoke', label: 'Retirer l’accès', cls: 'btn-danger', handler: async () => { await api(P(`/staff/${s.id}/access`), { method: 'DELETE' }); toast('Accès retiré.'); renderTeam(); } }] : []),
+      {
+        id: 'invite', label: s.access ? 'Renvoyer l’invitation' : 'Envoyer l’invitation', cls: 'btn-brand',
+        handler: async (d) => {
+          const r = await api(P(`/staff/${s.id}/access`), { method: 'POST', body: { email: $('#acc-email', d).value } });
+          $('#acc-result', d).innerHTML = `<p class="small badge-ok" style="padding:10px;border-radius:10px">Invitation envoyée par e-mail. Vous pouvez aussi transmettre ce lien (valable 7 jours) :</p><input readonly value="${esc(r.invite_url)}" onclick="this.select()">`;
+          renderTeam();
+          return false;
+        },
+      },
+    ],
   });
 }
 
@@ -988,7 +1014,8 @@ const ROUTES = {
 };
 
 async function route() {
-  const name = location.hash.slice(1) || 'dashboard';
+  let name = location.hash.slice(1) || (ctx.isStaff ? 'agenda' : 'dashboard');
+  if (ctx.isStaff && !STAFF_ROUTES.includes(name)) name = 'agenda';
   const fn = ROUTES[name] || renderDashboard;
   $$('[data-route]').forEach((a) => a.classList.toggle('active', a.dataset.route === name));
   $('#sidebar').classList.remove('open');
@@ -1002,11 +1029,17 @@ async function route() {
 
 (async function boot() {
   const me = await api('/api/auth/me');
-  if (!me.user || (me.user.role !== 'pro' && !(me.user.role === 'admin' && adminSalon))) {
+  if (!me.user || (!['pro', 'staff'].includes(me.user.role) && !(me.user.role === 'admin' && adminSalon))) {
     location.href = me.user?.role === 'admin' ? '/admin' : '/connexion?next=/app';
     return;
   }
   $('#who').innerHTML = `<b style="color:#fff">${esc(me.user.name)}</b><div>${esc(me.user.email)}</div>`;
+  ctx.isStaff = me.user.role === 'staff';
+  if (ctx.isStaff) {
+    // Employee access: own agenda and client file only.
+    $$('[data-route]').forEach((a) => { if (!STAFF_ROUTES.includes(a.dataset.route)) a.remove(); });
+    if (!location.hash) location.hash = '#agenda';
+  }
   try {
     await refreshCtx();
   } catch (err) {

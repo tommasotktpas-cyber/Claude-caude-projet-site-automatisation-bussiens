@@ -240,3 +240,38 @@ test('automations send 24h reminders once', async () => {
   }
   assert.equal(one("SELECT COUNT(*) AS n FROM notifications WHERE booking_id = ? AND kind = 'reminder' AND channel = 'email'", b.id).n, 1);
 });
+
+test('employee accounts only see their own agenda', async () => {
+  const uid = Number(run("INSERT INTO users (email, password_hash, name, role) VALUES ('owner2@test.lu', ?, 'Owner', 'pro')", hashPassword('password123')).lastInsertRowid);
+  const salon = createSalon(uid, {
+    name: 'Salon Equipe', city: 'Lausanne',
+    hours: [{ weekday: 2, open: '09:00', close: '12:00' }],
+    services: [{ name: 'Coupe', duration_min: 60, price_cents: 5000 }],
+    staff: [{ name: 'Alice' }, { name: 'Bob' }],
+  });
+  const [alice, bob] = require('../server/db').all('SELECT id FROM staff WHERE salon_id = ? ORDER BY id', salon.id).map((s) => s.id);
+  const sv = one('SELECT id FROM services WHERE salon_id = ?', salon.id).id;
+  const owner = (await req('/api/auth/login', { method: 'POST', body: { email: 'owner2@test.lu', password: 'password123' } })).cookie;
+  await req('/api/pro/bookings', { method: 'POST', cookie: owner, body: { service_id: sv, staff_id: alice, date: TUE, time: '09:00', customer: { name: 'Client Alice' } } });
+  const bobBooking = await req('/api/pro/bookings', { method: 'POST', cookie: owner, body: { service_id: sv, staff_id: bob, date: TUE, time: '09:00', customer: { name: 'Client Bob' } } });
+
+  const inv = await req(`/api/pro/staff/${alice}/access`, { method: 'POST', cookie: owner, body: { email: 'alice@test.lu' } });
+  assert.equal(inv.status, 201);
+  const token = inv.body.invite_url.split('t=')[1];
+  const set = await req('/api/auth/reset', { method: 'POST', body: { token, password: 'alice-pass-1' } });
+  assert.equal(set.body.role, 'staff');
+  const cookie = set.cookie;
+
+  const agenda = await req(`/api/pro/agenda?from=${TUE}&to=${TUE}`, { cookie });
+  assert.deepEqual(agenda.body.bookings.map((b) => b.client_name), ['Client Alice']);
+  assert.equal((await req(`/api/pro/bookings/${bobBooking.body.id}`, { method: 'PATCH', cookie, body: { status: 'cancelled' } })).status, 404);
+  for (const path of ['/api/pro/stats', '/api/pro/site', '/api/pro/export/clients.csv']) {
+    assert.equal((await req(path, { cookie })).status, 403, path);
+  }
+  assert.equal((await req('/api/pro/plan', { method: 'POST', cookie, body: { plan: 'premium' } })).status, 403);
+  const salonInfo = await req('/api/pro/salon', { cookie });
+  assert.equal(salonInfo.body.salon.ical_token, undefined, 'no access to the full agenda feed');
+
+  await req(`/api/pro/staff/${alice}/access`, { method: 'DELETE', cookie: owner });
+  assert.equal((await req('/api/pro/agenda', { cookie })).status, 401, 'revoked account is logged out');
+});

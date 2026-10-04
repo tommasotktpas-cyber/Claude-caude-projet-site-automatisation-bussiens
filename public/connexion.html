@@ -65,7 +65,7 @@
   <script src="/js/common.js"></script>
   <script>
     'use strict';
-    mountChrome().then((u) => { if (u) location.href = u.role === 'pro' ? '/app' : u.role === 'admin' ? '/admin' : '/compte'; });
+    mountChrome().then((u) => { if (u) location.href = u.role === 'pro' || role === 'staff' ? '/app' : u.role === 'admin' ? '/admin' : '/compte'; });
     const params = new URLSearchParams(location.search);
     function tab(name) {
       $$('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
@@ -75,7 +75,7 @@
     if (params.get('pro')) tab('pro');
     else if (params.get('register')) tab('register');
 
-    const redirect = (role) => { location.href = params.get('next') || (role === 'pro' ? '/app' : role === 'admin' ? '/admin' : '/compte'); };
+    const redirect = (role) => { location.href = params.get('next') || (role === 'pro' || role === 'staff' ? '/app' : role === 'admin' ? '/admin' : '/compte'); };
     const bind = (id, url) => $(id).addEventListener('submit', async (e) => {
       e.preventDefault();
       const btn = e.target.querySelector('button[type="submit"], button:not([type])');
