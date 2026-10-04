@@ -19,6 +19,7 @@ function validateCustomer(c = {}, { requireEmail = true } = {}) {
     phone: clean(c.phone, 40),
     notes: clean(c.notes, 500),
     marketing: c.marketing ? 1 : 0,
+    birthday: /^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(String(c.birthday || '').slice(5)) ? String(c.birthday).slice(5) : (/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(c.birthday || '') ? c.birthday : ''),
   };
   if (customer.name.length < 2) throw new HttpError(400, 'Merci d’indiquer votre nom.');
   if (!customer.email && !requireEmail) {
@@ -34,14 +35,15 @@ function upsertClient(salonId, customer, userId) {
   if (existing) {
     run(
       `UPDATE clients SET name = ?, phone = CASE WHEN ? != '' THEN ? ELSE phone END,
-         user_id = COALESCE(user_id, ?), marketing_opt_in = MAX(marketing_opt_in, ?) WHERE id = ?`,
-      customer.name, customer.phone, customer.phone, userId ?? null, customer.marketing, existing.id,
+         user_id = COALESCE(user_id, ?), marketing_opt_in = MAX(marketing_opt_in, ?),
+         birthday = CASE WHEN ? != '' THEN ? ELSE birthday END WHERE id = ?`,
+      customer.name, customer.phone, customer.phone, userId ?? null, customer.marketing, customer.birthday, customer.birthday, existing.id,
     );
     return existing.id;
   }
   return Number(run(
-    'INSERT INTO clients (salon_id, user_id, name, email, phone, marketing_opt_in) VALUES (?,?,?,?,?,?)',
-    salonId, userId ?? null, customer.name, customer.email, customer.phone, customer.marketing,
+    'INSERT INTO clients (salon_id, user_id, name, email, phone, marketing_opt_in, birthday) VALUES (?,?,?,?,?,?,?)',
+    salonId, userId ?? null, customer.name, customer.email, customer.phone, customer.marketing, customer.birthday,
   ).lastInsertRowid);
 }
 
@@ -59,6 +61,7 @@ function createBooking({ salonId, serviceId, staffId = null, date, time, custome
   if (source !== 'pro' && !billing.salonActive(salon)) throw new HttpError(403, 'La réservation en ligne est momentanément indisponible pour ce salon. Merci de le contacter directement.');
   const mode = source === 'pro' ? 'off' : billing.depositMode(salon);
 
+  let dealPct = 0;
   const id = tx(() => {
     let chosenStaff;
     if (force && staffId) {
@@ -69,18 +72,20 @@ function createBooking({ salonId, serviceId, staffId = null, date, time, custome
       const slot = slots.find((s) => s.time === time);
       if (!slot) throw new HttpError(409, 'Ce créneau vient d’être pris. Merci d’en choisir un autre.');
       chosenStaff = pickStaff(slot.staff_ids, date);
+      if (source !== 'pro') dealPct = slot.deal || 0;
     }
     const clientId = upsertClient(salonId, cust, userId);
     const start = `${date}T${time}`;
-    const deposit = mode === 'off' ? 0 : Math.round((service.price_cents * salon.deposit_percent) / 100);
+    const price = Math.round((service.price_cents * (100 - dealPct)) / 100);
+    const deposit = mode === 'off' ? 0 : Math.round((price * salon.deposit_percent) / 100);
     // Real deposits hold the slot as "pending" until Stripe confirms payment (released after 30 min otherwise).
     const pending = mode === 'stripe' && deposit > 0;
     return Number(run(
       `INSERT INTO bookings (salon_id, service_id, staff_id, client_id, user_id, start_at, end_at, price_cents,
-         deposit_cents, paid_cents, source, token, notes, payment_status)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         deposit_cents, paid_cents, source, token, notes, payment_status, deal_percent)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       salonId, service.id, chosenStaff, clientId, userId, start, T.addMinutes(start, service.duration_min),
-      service.price_cents, deposit, pending ? 0 : deposit, source, randomToken(), cust.notes, pending ? 'pending' : 'none',
+      price, deposit, pending ? 0 : deposit, source, randomToken(), cust.notes, pending ? 'pending' : 'none', dealPct,
     ).lastInsertRowid);
   });
 

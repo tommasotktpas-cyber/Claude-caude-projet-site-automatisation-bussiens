@@ -111,7 +111,7 @@ router.get('/me', (req, res) => {
 
 router.get('/my-bookings', requireRole('client', 'pro', 'admin'), (req, res) => {
   res.json(all(
-    `SELECT b.token, b.start_at, b.status, b.price_cents, s.name AS salon_name, s.slug AS salon_slug, sv.name AS service_name, st.name AS staff_name
+    `SELECT b.token, b.start_at, b.status, b.price_cents, b.service_id, s.name AS salon_name, s.slug AS salon_slug, sv.name AS service_name, st.name AS staff_name
      FROM bookings b JOIN salons s ON s.id = b.salon_id JOIN services sv ON sv.id = b.service_id JOIN staff st ON st.id = b.staff_id
      JOIN clients c ON c.id = b.client_id
      WHERE b.user_id = ? OR c.user_id = ? ORDER BY b.start_at DESC LIMIT 100`, req.user.id, req.user.id,

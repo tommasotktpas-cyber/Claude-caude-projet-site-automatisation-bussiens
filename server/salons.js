@@ -39,9 +39,10 @@ function createSalon(ownerId, data) {
     { name: 'Prestation découverte', category: 'Prestations', duration_min: 30, price_cents: 3000 },
   ];
   const serviceIds = services.map((s, i) => Number(run(
-    'INSERT INTO services (salon_id, name, category, description, duration_min, price_cents, position, studio) VALUES (?,?,?,?,?,?,?,?)',
+    'INSERT INTO services (salon_id, name, category, description, duration_min, price_cents, position, studio, rebook_weeks) VALUES (?,?,?,?,?,?,?,?,?)',
     salonId, s.name, s.category || 'Prestations', s.description || '', s.duration_min, s.price_cents, i,
     ['coiffure', 'barbier'].includes(category) && STUDIO_SERVICE_RE.test(`${s.name} ${s.category || ''}`) ? 1 : 0,
+    s.rebook_weeks ?? (/barbe|rasage/i.test(s.name) ? 3 : /ongle|semi|gel|pieds/i.test(s.name) ? 3 : /couleur|balayage|racines/i.test(s.name) ? 7 : /coupe|d[ée]grad/i.test(s.name) ? 5 : 0),
   ).lastInsertRowid));
 
   const staff = data.staff || [{ name: data.owner_name || 'Gérant(e)', title: 'Fondateur·rice' }];

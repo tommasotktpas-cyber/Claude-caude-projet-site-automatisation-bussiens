@@ -216,7 +216,7 @@
       const day = e.target.closest('[data-day]');
       if (day) { bk.date = day.dataset.day; bk.time = null; return loadSlots(); }
       const slot = e.target.closest('[data-slot]');
-      if (slot) { bk.time = slot.dataset.slot; return go(bk.service.studio ? 3.5 : 4); }
+      if (slot) { bk.time = slot.dataset.slot; bk.deal = bk.deals?.[bk.time] || 0; return go(bk.service.studio ? 3.5 : 4); }
     });
 
     function renderDateStep(progress) {
@@ -246,14 +246,16 @@
       area.innerHTML = '<div class="slots">' + '<div class="skeleton" style="height:42px"></div>'.repeat(8) + '</div>';
       const qs = new URLSearchParams({ service: bk.service.id, date: bk.date, staff: bk.staff || '' });
       try {
-        const { slots, reason } = await api(`/api/public/salons/${encodeURIComponent(slug)}/slots?${qs}`);
+        const { slots, reason, deals = {} } = await api(`/api/public/salons/${encodeURIComponent(slug)}/slots?${qs}`);
+        bk.deals = deals;
         const label = `<h3 style="font-size:1rem">${fmt.date(bk.date)}</h3>`;
         if (slots.length) {
           const parts = { Matin: [], 'Après-midi': [], Soir: [] };
           for (const t of slots) parts[t < '12:00' ? 'Matin' : t < '17:00' ? 'Après-midi' : 'Soir'].push(t);
           area.innerHTML = label + Object.entries(parts).filter(([, l]) => l.length).map(([k, l]) => `
             <div class="small muted" style="margin:14px 0 8px;font-weight:600">${k}</div>
-            <div class="slots">${l.map((t) => `<button class="slot ${t === bk.time ? 'selected' : ''}" data-slot="${t}">${t.replace(':', 'h')}</button>`).join('')}</div>`).join('');
+            <div class="slots">${l.map((t) => `<button class="slot ${t === bk.time ? 'selected' : ''} ${deals[t] ? 'deal' : ''}" data-slot="${t}">${t.replace(':', 'h')}${deals[t] ? `<small>−${deals[t]} %</small>` : ''}</button>`).join('')}</div>`).join('');
+          if (Object.keys(deals).length) area.insertAdjacentHTML('afterbegin', `<div class="deal-banner">🔥 Dernière minute : −${Object.values(deals)[0]} % sur les créneaux marqués</div>`);
         } else {
           area.innerHTML = `${label}<div class="card center" style="padding:20px"><p class="muted" style="margin:0 0 12px">${esc(reason || 'Aucun créneau.')}</p><div id="next-days" class="row" style="justify-content:center"></div></div>
             <div class="card" style="margin-top:14px"><b>Être prévenu si une place se libère ce jour-là</b>
@@ -279,11 +281,12 @@
 
     function renderDetailsStep(progress) {
       const s = data.salon;
-      const deposit = Math.round((bk.service.price_cents * s.deposit_percent) / 100);
+      const price = Math.round((bk.service.price_cents * (100 - (bk.deal || 0))) / 100);
+      const deposit = Math.round((price * s.deposit_percent) / 100);
       const staffName = bk.staff ? data.staff.find((p) => p.id === bk.staff).name : 'Premier disponible';
       $('#drawer-body').innerHTML = `${progress}
         <div class="summary" style="margin-bottom:18px">
-          <div><span>${esc(bk.service.name)}</span><b>${fmt.eur(bk.service.price_cents)}</b></div>
+          <div><span>${esc(bk.service.name)}${bk.deal ? ` <span class="badge badge-danger">−${bk.deal} % dernière minute</span>` : ''}</span><b>${bk.deal ? `<s class="muted" style="font-weight:400">${fmt.eur(bk.service.price_cents)}</s> ` : ''}${fmt.eur(price)}</b></div>
           <div class="muted"><span>${fmt.date(bk.date)} à ${bk.time.replace(':', 'h')}</span><span>${fmt.duration(bk.service.duration_min)}</span></div>
           <div class="muted"><span>Avec</span><span>${esc(staffName)}</span></div>
           ${deposit ? `<div style="border-top:1px solid var(--line);margin-top:6px;padding-top:8px"><span>Acompte à régler maintenant</span><b>${fmt.eur(deposit)}</b></div>` : ''}
@@ -300,6 +303,7 @@
             <div class="field"><label for="f-phone">Téléphone <span class="muted">(rappel SMS)</span></label><input id="f-phone" name="phone" type="tel" autocomplete="tel" value="${esc(user?.phone || '')}"></div>
           </div>
           <div class="field"><label for="f-notes">Un mot pour le salon ? <span class="muted">(facultatif)</span></label><textarea id="f-notes" name="notes" placeholder="Allergies, longueur souhaitée, première visite…"></textarea></div>
+          <div class="field"><label for="f-bday">Votre anniversaire <span class="muted">(facultatif — une petite surprise vous attend)</span></label><input id="f-bday" name="birthday" type="date" max="${data.today}"></div>
           <label class="check small"><input type="checkbox" name="marketing"> J’accepte de recevoir les offres de ${esc(s.name)} (désinscription en 1 clic).</label>
           ${deposit ? `<div class="card" style="margin-top:14px;background:var(--surface-2);border:0"><b>Paiement sécurisé de l’acompte</b><p class="small muted" style="margin:6px 0 0">L’acompte est déduit du prix final. Remboursé si vous annulez plus de ${s.cancel_hours} h avant.</p></div>` : ''}
           <p class="small muted" style="margin-top:14px">En confirmant, vous acceptez les <a href="/mentions#cgu" target="_blank">CGU</a>. Annulation gratuite jusqu’à ${s.cancel_hours} h avant le rendez-vous.</p>
@@ -345,7 +349,27 @@
       }
     }
 
+    /** Small celebration on confirmation (skipped when the visitor prefers reduced motion). */
+    function confetti() {
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const c = document.createElement('canvas');
+      c.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:300';
+      document.body.append(c);
+      const ctx2 = c.getContext('2d');
+      const W = (c.width = innerWidth); const H = (c.height = innerHeight);
+      const colors = [getComputedStyle(document.documentElement).getPropertyValue('--brand').trim() || '#6d28d9', '#f0643c', '#f5b83d', '#15803d', '#0ea5e9'];
+      const parts = Array.from({ length: 140 }, () => ({ x: W - 260 + Math.random() * 220, y: 120 + Math.random() * 40, vx: (Math.random() - .5) * 9, vy: -Math.random() * 10 - 3, r: 4 + Math.random() * 5, c: colors[Math.floor(Math.random() * colors.length)], a: Math.random() * 6 }));
+      let f = 0;
+      (function tick() {
+        ctx2.clearRect(0, 0, W, H);
+        for (const p of parts) { p.vy += 0.32; p.x += p.vx; p.y += p.vy; p.a += 0.15; ctx2.save(); ctx2.translate(p.x, p.y); ctx2.rotate(p.a); ctx2.fillStyle = p.c; ctx2.fillRect(-p.r / 2, -p.r / 2, p.r, p.r * 0.6); ctx2.restore(); }
+        if (++f < 140) requestAnimationFrame(tick); else c.remove();
+      })();
+    }
+
     function showSuccess(token) {
+      confetti();
+      const price = Math.round((bk.service.price_cents * (100 - (bk.deal || 0))) / 100);
       bk.step = 5;
       $('#drawer-back').style.visibility = 'hidden';
       $('#drawer-title').textContent = 'C’est réservé !';
@@ -355,7 +379,7 @@
           <h2 style="font-size:1.6rem">Rendez-vous confirmé</h2>
           <p class="muted">Un e-mail de confirmation vient de vous être envoyé. Vous recevrez un rappel la veille.</p></div>
         <div class="summary" style="margin:18px 0">
-          <div><span>${esc(bk.service.name)}</span><b>${fmt.eur(bk.service.price_cents)}</b></div>
+          <div><span>${esc(bk.service.name)}${bk.deal ? ` <span class="badge badge-danger">−${bk.deal} % dernière minute</span>` : ''}</span><b>${bk.deal ? `<s class="muted" style="font-weight:400">${fmt.eur(bk.service.price_cents)}</s> ` : ''}${fmt.eur(price)}</b></div>
           <div class="muted"><span>${fmt.date(bk.date)} à ${bk.time.replace(':', 'h')}</span></div>
           <div class="muted"><span>${esc(data.salon.address)}, ${esc(data.salon.city)}</span></div>
         </div>

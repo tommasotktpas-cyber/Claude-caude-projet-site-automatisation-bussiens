@@ -259,6 +259,13 @@ function seed() {
       }
     }
 
+    // Past visits are considered already followed up (no burst of "time to rebook" e-mails on first start).
+    run('UPDATE bookings SET rebook_sent = 1 WHERE start_at < ?', `${today}T00:00`);
+    for (const c of all('SELECT id FROM clients')) {
+      if (rand() < 0.6) run('UPDATE clients SET birthday = ? WHERE id = ?', `${String(1 + Math.floor(rand() * 12)).padStart(2, '0')}-${String(1 + Math.floor(rand() * 28)).padStart(2, '0')}`, c.id);
+    }
+    run("UPDATE salons SET lastminute_percent = 20, lastminute_hours = 24 WHERE id IN (SELECT id FROM salons ORDER BY id LIMIT 2)");
+
     run('UPDATE clients SET created_at = (SELECT MIN(created_at) FROM bookings b WHERE b.client_id = clients.id) WHERE EXISTS (SELECT 1 FROM bookings b WHERE b.client_id = clients.id)');
   });
 }

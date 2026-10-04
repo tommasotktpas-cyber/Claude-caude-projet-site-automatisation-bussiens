@@ -95,9 +95,15 @@ function getSlots({ salonId, serviceId, date, staffId = null, excludeBookingId =
     }
   }
 
+  // Last-minute deal: empty slots starting within the next N hours get an automatic discount.
+  const dealPct = salon.lastminute_percent > 0 ? salon.lastminute_percent : 0;
+  const dealUntil = dealPct ? T.addMinutes(now.iso, salon.lastminute_hours * 60) : '';
   const slots = [...byTime.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([time, staff_ids]) => ({ time, staff_ids }));
+    .map(([time, staff_ids]) => {
+      const at = `${date}T${time}`;
+      return { time, staff_ids, deal: dealPct && at > now.iso && at <= dealUntil ? dealPct : 0 };
+    });
   return { slots, reason: slots.length ? undefined : 'Complet ce jour-là.' };
 }
 

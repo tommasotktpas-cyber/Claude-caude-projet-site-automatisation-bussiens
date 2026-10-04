@@ -365,3 +365,8 @@ body.in-modal .drawer-backdrop { background: transparent; }
 .style-sheet img { width: 120px; height: 120px; object-fit: cover; border-radius: 10px; background: #f3efe9; }
 @media (min-width: 900px) { .studio.wide { grid-template-columns: 1.1fr 1fr; align-items: start; } .studio.wide .studio-stage { max-height: none; position: sticky; top: 20px; } }
 @media (max-width: 420px) { .studio-sliders { grid-template-columns: 1fr; } }
+
+.slot.deal { border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); position: relative; }
+.slot small { display: block; font-size: .68rem; color: var(--danger); font-weight: 700; }
+.slot.selected small { color: #fff; }
+.deal-banner { background: var(--danger-soft); color: var(--danger); font-weight: 600; font-size: .88rem; padding: 8px 12px; border-radius: 10px; margin-bottom: 10px; }

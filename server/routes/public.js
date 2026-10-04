@@ -87,9 +87,21 @@ router.get('/salons', (req, res) => {
   };
   rows.sort(sorters[sort] || sorters.rating);
   const services = all("SELECT salon_id, name FROM services WHERE active = 1 ORDER BY position, id");
+  // "Available today at 14:30" on each card: first free slot today or tomorrow for the salon's first service.
+  const { getSlots } = require('../availability');
+  const nextSlot = (salonId) => {
+    const sv = one('SELECT id FROM services WHERE salon_id = ? AND active = 1 ORDER BY position, id LIMIT 1', salonId);
+    if (!sv) return null;
+    for (const [i, date] of [now.date, T.addDays(now.date, 1)].entries()) {
+      const first = getSlots({ salonId, serviceId: sv.id, date }).slots[0];
+      if (first) return { day: i === 0 ? 'today' : 'tomorrow', time: first.time, deal: first.deal };
+    }
+    return null;
+  };
   res.json(rows.map((r) => ({
     ...publicSalon(r),
     top_services: services.filter((s) => s.salon_id === r.id).slice(0, 3).map((s) => s.name),
+    next_slot: nextSlot(r.id),
   })));
 });
 
@@ -115,7 +127,8 @@ router.get('/salons/:slug', (req, res) => {
 router.get('/salons/:slug/slots', (req, res) => {
   const salon = salonBySlug(req.params.slug);
   const out = getSlots({ salonId: salon.id, serviceId: Number(req.query.service), date: String(req.query.date), staffId: req.query.staff ? Number(req.query.staff) : null });
-  res.json({ slots: out.slots.map((s) => s.time), reason: out.reason });
+  const deals = Object.fromEntries(out.slots.filter((x) => x.deal).map((x) => [x.time, x.deal]));
+  res.json({ slots: out.slots.map((x) => x.time), deals, reason: out.reason });
 });
 
 router.get('/salons/:slug/next', (req, res) => {

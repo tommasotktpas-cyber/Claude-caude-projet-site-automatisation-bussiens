@@ -127,7 +127,50 @@ function runAutomations() {
     run('UPDATE bookings SET review_requested = 1 WHERE id = ?', id);
     notify('review', id);
   }
-  return { reminders: due.length, reviews: done.length };
+  return { reminders: due.length, reviews: done.length, rebooks: runRebookReminders(now), birthdays: runBirthdays(now) };
+}
+
+/** "Time for your next cut": X weeks after a completed visit, if the client has nothing booked since. */
+function runRebookReminders(now) {
+  const rows = all(
+    `SELECT b.id, b.client_id, b.salon_id, b.service_id, b.staff_id, sv.name AS service_name, sv.rebook_weeks, s.name AS salon_name, s.slug, s.email AS salon_email,
+            c.name AS client_name, c.email AS client_email, st.name AS staff_name
+     FROM bookings b JOIN services sv ON sv.id = b.service_id JOIN salons s ON s.id = b.salon_id JOIN clients c ON c.id = b.client_id JOIN staff st ON st.id = b.staff_id
+     WHERE b.status = 'completed' AND b.rebook_sent = 0 AND sv.rebook_weeks > 0 AND sv.active = 1
+       AND date(substr(b.start_at,1,10), '+' || (sv.rebook_weeks * 7) || ' days') <= ?
+       AND substr(b.start_at,1,10) >= date(?, '-120 days')
+       AND NOT EXISTS (SELECT 1 FROM bookings nb WHERE nb.client_id = b.client_id AND nb.start_at > b.start_at AND nb.status != 'cancelled')`,
+    now.date, now.date,
+  );
+  for (const r of rows) {
+    run('UPDATE bookings SET rebook_sent = 1 WHERE id = ?', r.id);
+    if (r.client_email.endsWith('.invalid')) continue;
+    const subject = `${r.client_name.split(' ')[0]}, c’est le moment de revenir chez ${r.salon_name}`;
+    const body = `Bonjour ${r.client_name.split(' ')[0]},\n\nVotre dernier rendez-vous « ${r.service_name} » date de ${r.rebook_weeks} semaines : c’est le bon moment pour l’entretenir.\n`
+      + `Réservez en 30 secondes avec ${r.staff_name} : ${APP_URL}/salon.html?s=${r.slug}&service=${r.service_id}\n\nÀ bientôt !`;
+    const info = run("INSERT INTO notifications (salon_id, booking_id, kind, channel, recipient, subject, body) VALUES (?,?, 'rebook', 'email', ?,?,?)", r.salon_id, r.id, r.client_email, subject, body);
+    deliver(info.lastInsertRowid, { kind: 'rebook', channel: 'email', to: r.client_email, subject, body, salon_id: r.salon_id, fromName: r.salon_name, replyTo: r.salon_email || undefined });
+  }
+  return rows.length;
+}
+
+/** Birthday message with the salon's offer, once a year, from 9:00 on the day. */
+function runBirthdays(now) {
+  if (now.min < 9 * 60) return 0;
+  const year = Number(now.date.slice(0, 4));
+  const rows = all(
+    `SELECT c.*, s.name AS salon_name, s.slug, s.birthday_offer, s.email AS salon_email FROM clients c JOIN salons s ON s.id = c.salon_id
+     WHERE c.birthday = ? AND c.birthday_sent_year < ? AND s.birthday_offer != '' AND c.email NOT LIKE '%.invalid'`,
+    now.date.slice(5), year,
+  );
+  for (const c of rows) {
+    run('UPDATE clients SET birthday_sent_year = ? WHERE id = ?', year, c.id);
+    const subject = `Joyeux anniversaire ${c.name.split(' ')[0]} ! 🎂`;
+    const body = `Bonjour ${c.name.split(' ')[0]},\n\nToute l’équipe de ${c.salon_name} vous souhaite un très joyeux anniversaire !\nPour l’occasion : ${c.birthday_offer}.\n\nRéservez ici : ${APP_URL}/salon.html?s=${c.slug}`;
+    const info = run("INSERT INTO notifications (salon_id, kind, channel, recipient, subject, body) VALUES (?, 'birthday', 'email', ?,?,?)", c.salon_id, c.email, subject, body);
+    deliver(info.lastInsertRowid, { kind: 'birthday', channel: 'email', to: c.email, subject, body, salon_id: c.salon_id, fromName: c.salon_name, replyTo: c.salon_email || undefined });
+  }
+  return rows.length;
 }
 
 module.exports = { notify, notifyWaitlist, runAutomations, APP_URL, euros, frDate };

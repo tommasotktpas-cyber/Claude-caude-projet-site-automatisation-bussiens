@@ -353,6 +353,27 @@ CREATE TABLE IF NOT EXISTS stock_movements (
 addColumn('salons', 'giftcards_enabled', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('sales', 'prepaid_cents', 'INTEGER NOT NULL DEFAULT 0');
 
+// Retention & last-minute features.
+{
+  const had = db.prepare('PRAGMA table_info(services)').all().some((c) => c.name === 'rebook_weeks');
+  addColumn('services', 'rebook_weeks', 'INTEGER NOT NULL DEFAULT 0');
+  if (!had) {
+    // Sensible defaults from the service name: haircut ~5 weeks, beard 3, nails 3, colour 7.
+    const guess = (n) => (/barbe|rasage/i.test(n) ? 3 : /ongle|semi|gel|manucure|pieds/i.test(n) ? 3 : /couleur|balayage|racines/i.test(n) ? 7 : /coupe|d[ée]grad/i.test(n) ? 5 : 0);
+    for (const r of db.prepare('SELECT id, name FROM services').all()) {
+      const w = guess(r.name);
+      if (w) db.prepare('UPDATE services SET rebook_weeks = ? WHERE id = ?').run(w, r.id);
+    }
+  }
+}
+addColumn('bookings', 'rebook_sent', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('clients', 'birthday', "TEXT NOT NULL DEFAULT ''");
+addColumn('clients', 'birthday_sent_year', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('salons', 'birthday_offer', "TEXT NOT NULL DEFAULT '-15 % sur votre prochaine prestation, valable tout le mois'");
+addColumn('salons', 'lastminute_percent', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('salons', 'lastminute_hours', 'INTEGER NOT NULL DEFAULT 24');
+addColumn('bookings', 'deal_percent', 'INTEGER NOT NULL DEFAULT 0');
+
 db.exec(`CREATE TABLE IF NOT EXISTS stripe_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
 
 /** Runs fn inside an IMMEDIATE transaction (serialises writers — prevents double booking). Re-entrant. */

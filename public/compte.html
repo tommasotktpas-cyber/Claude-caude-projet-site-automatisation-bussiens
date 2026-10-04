@@ -28,7 +28,8 @@
         <a class="list-item" href="/rdv.html?t=${encodeURIComponent(b.token)}" style="text-decoration:none">
           <div class="grow"><b>${esc(b.service_name)}</b> <span class="muted">· ${esc(b.salon_name)}</span>
             <div class="small muted">${fmt.dateTime(b.start_at)} · avec ${esc(b.staff_name)}</div></div>
-          <span class="badge ${STATUS[b.status].cls}">${STATUS[b.status].label}</span></a>`;
+          <span class="badge ${STATUS[b.status].cls}">${STATUS[b.status].label}</span></a>
+        ${b.status === 'completed' ? `<div style="text-align:right;margin:-6px 0 6px"><a class="small" href="/salon.html?s=${encodeURIComponent(b.salon_slug)}&service=${b.service_id}">↻ Reprendre ce rendez-vous</a></div>` : ''}`;
       $('#page').innerHTML = `
         <div class="row between"><h1 style="font-size:2rem;margin:0">Bonjour ${esc(user.name.split(' ')[0])}</h1><button class="btn btn-ghost btn-sm" id="logout">Se déconnecter</button></div>
         <div class="kpis" style="margin-top:20px">

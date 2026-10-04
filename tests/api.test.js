@@ -359,3 +359,36 @@ test('till: checkout a booking with products, tip and gift card; stock, report a
   assert.equal(one('SELECT stock FROM products WHERE id = ?', prod.body.id).stock, 2, 'void restores stock');
   assert.equal((await req(`/api/public/gift-cards/${gc.body.code}`)).body.balance_cents, 5000, 'void refunds the gift card');
 });
+
+test('retention: last-minute deal, rebook reminder and birthday message', async () => {
+  const uid = Number(run("INSERT INTO users (email, password_hash, name, role) VALUES ('retain@test.lu', ?, 'Owner', 'pro')", hashPassword('password123')).lastInsertRowid);
+  const salon = createSalon(uid, {
+    name: 'Salon Fidèle', city: 'Sion', category: 'coiffure',
+    hours: [1, 2].map((weekday) => ({ weekday, open: '09:00', close: '18:00' })),
+    services: [{ name: 'Coupe homme', duration_min: 30, price_cents: 4000 }], staff: [{ name: 'Nina' }],
+  });
+  run('UPDATE salons SET lastminute_percent = 20, lastminute_hours = 24, min_notice_min = 0 WHERE id = ?', salon.id);
+  const sv = one('SELECT id, rebook_weeks FROM services WHERE salon_id = ?', salon.id);
+  assert.equal(sv.rebook_weeks, 5, 'haircut: rebook reminder after 5 weeks by default');
+
+  // Now = Monday 08:00 → Monday 15:00 is within 24 h (deal), Tuesday 15:00 is not.
+  const today = await req(`/api/public/salons/${salon.slug}/slots?service=${sv.id}&date=2026-10-05`);
+  assert.equal(today.body.deals['15:00'], 20);
+  const tomorrow = await req(`/api/public/salons/${salon.slug}/slots?service=${sv.id}&date=${TUE}`);
+  assert.equal(tomorrow.body.deals['15:00'], undefined);
+  const b = await req(`/api/public/salons/${salon.slug}/bookings`, { method: 'POST', body: { service_id: sv.id, date: '2026-10-05', time: '15:00', customer: { ...customer, email: 'fidele@test.ch', birthday: '1990-10-05' } } });
+  const row = one('SELECT price_cents, deal_percent, client_id FROM bookings WHERE id = ?', b.body.id);
+  assert.deepEqual([row.price_cents, row.deal_percent], [3200, 20]);
+
+  // A visit 6 weeks ago without a later booking triggers "time to come back"; the birthday mail goes out once.
+  run("UPDATE bookings SET start_at = '2026-08-20T10:00', end_at = '2026-08-20T10:30', status = 'completed' WHERE id = ?", b.body.id);
+  process.env.LUMEA_NOW = '2026-10-05T10:00';
+  try {
+    runAutomations();
+    runAutomations();
+  } finally {
+    process.env.LUMEA_NOW = '2026-10-05T08:00';
+  }
+  assert.equal(one("SELECT COUNT(*) AS n FROM notifications WHERE kind = 'rebook' AND recipient = 'fidele@test.ch'").n, 1);
+  assert.equal(one("SELECT COUNT(*) AS n FROM notifications WHERE kind = 'birthday' AND recipient = 'fidele@test.ch'").n, 1);
+});

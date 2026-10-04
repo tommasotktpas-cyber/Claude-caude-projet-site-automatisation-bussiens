@@ -99,6 +99,7 @@
           <div class="body">
             <div class="row between"><h3>${esc(s.name)}</h3></div>
             <div class="row small" style="gap:10px">${rating}<span class="muted">· ${esc(s.city)}</span>${s.open_now ? '<span class="badge badge-ok"><span class="dot"></span>Ouvert</span>' : ''}</div>
+            ${s.next_slot ? `<div class="small"><span class="badge ${s.next_slot.deal ? 'badge-danger' : 'badge-ok'}">${s.next_slot.day === 'today' ? 'Dispo aujourd’hui' : 'Dispo demain'} à ${s.next_slot.time.replace(':', 'h')}${s.next_slot.deal ? ` · −${s.next_slot.deal} %` : ''}</span></div>` : ''}
             <div class="muted small">${s.min_price != null ? `À partir de <b style="color:var(--ink)">${fmt.eur(s.min_price)}</b>` : ''}${s.deposit_percent ? ' · Acompte sécurisé' : ''}</div>
             <div class="tags">${s.top_services.map((t) => `<span class="badge">${esc(t)}</span>`).join('')}</div>
           </div>

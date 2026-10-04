@@ -101,7 +101,7 @@ router.put('/salon', (req, res) => {
   if (name.length < 2) throw new HttpError(400, 'Nom trop court.');
   run(
     `UPDATE salons SET name=?, category=?, description=?, address=?, city=?, zip=?, phone=?, email=?, cover_url=?, accent=?,
-       deposit_percent=?, cancel_hours=?, buffer_min=?, slot_step=?, min_notice_min=?, max_days_ahead=?, loyalty_enabled=?, published=?, giftcards_enabled=?
+       deposit_percent=?, cancel_hours=?, buffer_min=?, slot_step=?, min_notice_min=?, max_days_ahead=?, loyalty_enabled=?, published=?, giftcards_enabled=?, lastminute_percent=?, lastminute_hours=?, birthday_offer=?
      WHERE id=?`,
     name,
     CATEGORIES.includes(b.category) ? b.category : s.category,
@@ -115,6 +115,8 @@ router.put('/salon', (req, res) => {
     b.loyalty_enabled === undefined ? s.loyalty_enabled : (b.loyalty_enabled ? 1 : 0),
     b.published === undefined ? s.published : (b.published ? 1 : 0),
     b.giftcards_enabled === undefined ? s.giftcards_enabled : (b.giftcards_enabled ? 1 : 0),
+    int(b.lastminute_percent, 0, 50, s.lastminute_percent), int(b.lastminute_hours, 1, 72, s.lastminute_hours),
+    b.birthday_offer === undefined ? s.birthday_offer : clean(b.birthday_offer, 160),
     s.id,
   );
   res.json({ ok: true });
@@ -187,7 +189,7 @@ function serviceFields(b) {
   if (!Number.isFinite(price) || price < 0) throw new HttpError(400, 'Prix invalide.');
   return {
     name, category: clean(b.category, 60) || 'Prestations', description: clean(b.description, 500), duration, price,
-    active: b.active === false ? 0 : 1, studio: b.studio ? 1 : 0,
+    active: b.active === false ? 0 : 1, studio: b.studio ? 1 : 0, rebook: int(b.rebook_weeks, 0, 52, 0),
   };
 }
 
@@ -195,8 +197,8 @@ router.post('/services', (req, res) => {
   const f = serviceFields(req.body || {});
   const id = tx(() => {
     const pos = one('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM services WHERE salon_id = ?', req.salon.id).p;
-    const sid = Number(run('INSERT INTO services (salon_id, name, category, description, duration_min, price_cents, active, position, studio) VALUES (?,?,?,?,?,?,?,?,?)',
-      req.salon.id, f.name, f.category, f.description, f.duration, f.price, f.active, pos, f.studio).lastInsertRowid);
+    const sid = Number(run('INSERT INTO services (salon_id, name, category, description, duration_min, price_cents, active, position, studio, rebook_weeks) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      req.salon.id, f.name, f.category, f.description, f.duration, f.price, f.active, pos, f.studio, f.rebook).lastInsertRowid);
     // New services are offered by every active staff member by default.
     for (const s of all('SELECT id FROM staff WHERE salon_id = ? AND active = 1', req.salon.id)) {
       run('INSERT INTO staff_services (staff_id, service_id) VALUES (?,?)', s.id, sid);
@@ -208,8 +210,8 @@ router.post('/services', (req, res) => {
 
 router.put('/services/:id', (req, res) => {
   const f = serviceFields(req.body || {});
-  const r = run('UPDATE services SET name=?, category=?, description=?, duration_min=?, price_cents=?, active=?, studio=? WHERE id=? AND salon_id=?',
-    f.name, f.category, f.description, f.duration, f.price, f.active, f.studio, Number(req.params.id), req.salon.id);
+  const r = run('UPDATE services SET name=?, category=?, description=?, duration_min=?, price_cents=?, active=?, studio=?, rebook_weeks=? WHERE id=? AND salon_id=?',
+    f.name, f.category, f.description, f.duration, f.price, f.active, f.studio, f.rebook, Number(req.params.id), req.salon.id);
   if (!r.changes) throw new HttpError(404, 'Prestation introuvable.');
   res.json({ ok: true });
 });
@@ -413,8 +415,9 @@ router.get('/clients/:id', (req, res) => {
 
 router.put('/clients/:id', (req, res) => {
   const b = req.body || {};
-  const r = run('UPDATE clients SET notes = ?, phone = COALESCE(?, phone) WHERE id = ? AND salon_id = ?',
-    clean(b.notes, 2000), b.phone === undefined ? null : clean(b.phone, 40), Number(req.params.id), req.salon.id);
+  const bday = /^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(b.birthday || '') ? b.birthday : (b.birthday === '' ? '' : null);
+  const r = run('UPDATE clients SET notes = ?, phone = COALESCE(?, phone), birthday = COALESCE(?, birthday) WHERE id = ? AND salon_id = ?',
+    clean(b.notes, 2000), b.phone === undefined ? null : clean(b.phone, 40), bday, Number(req.params.id), req.salon.id);
   if (!r.changes) throw new HttpError(404, 'Client introuvable.');
   res.json({ ok: true });
 });

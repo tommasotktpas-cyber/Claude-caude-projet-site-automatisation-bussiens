@@ -458,12 +458,21 @@ async function clientDetail(id) {
         <div class="kpi"><div class="label">Absences</div><div class="value" style="font-size:1.4rem">${c.history.filter((h) => h.status === 'no_show').length}</div></div>
       </div>
       <p class="small">${c.phone ? `📞 <a href="tel:${esc(c.phone.replace(/\s/g, ''))}">${esc(c.phone)}</a>` : ''} ${c.email.endsWith('.invalid') ? '' : `· ✉️ <a href="mailto:${esc(c.email)}">${esc(c.email)}</a>`}</p>
+      <div class="field"><label for="cd-bday">Anniversaire (JJ/MM)</label><input id="cd-bday" value="${c.birthday ? c.birthday.split('-').reverse().join('/') : ''}" placeholder="14/07" style="max-width:140px"></div>
       <div class="field"><label for="cd-notes">Fiche technique / notes privées</label><textarea id="cd-notes" placeholder="Couleur, préférences, allergies…">${esc(c.notes)}</textarea></div>
       <h4>Historique</h4>
       ${c.history.map((h) => `<div class="list-item small"><div class="grow"><b>${esc(h.service_name)}</b> · ${esc(h.staff_name)}<div class="muted">${fmt.dateTime(h.start_at)}</div></div><span>${fmt.eur(h.price_cents)}</span><span class="badge ${STATUS[h.status].cls}">${STATUS[h.status].label}</span></div>`).join('') || '<p class="muted">Aucun rendez-vous.</p>'}`,
     actions: [
       { id: 'close', label: 'Fermer', cls: 'btn-ghost' },
-      { id: 'save', label: 'Enregistrer', cls: 'btn-brand', handler: async (d) => { await api(P(`/clients/${id}`), { method: 'PUT', body: { notes: $('#cd-notes', d).value } }); toast('Fiche mise à jour.'); } },
+      {
+        id: 'save', label: 'Enregistrer', cls: 'btn-brand',
+        handler: async (d) => {
+          const m = $('#cd-bday', d).value.trim().match(/^(\d{1,2})[/.-](\d{1,2})$/);
+          const birthday = m ? `${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : '';
+          await api(P(`/clients/${id}`), { method: 'PUT', body: { notes: $('#cd-notes', d).value, birthday } });
+          toast('Fiche mise à jour.');
+        },
+      },
     ],
   });
 }
@@ -509,7 +518,8 @@ function serviceForm(s = null) {
       </div>
       <div class="field"><label>Description <span class="muted">(facultatif)</span></label><input name="description" value="${esc(s?.description || '')}"></div>
       <label class="check"><input type="checkbox" name="active" ${!s || s.active ? 'checked' : ''}> Réservable en ligne</label>
-      <label class="check"><input type="checkbox" name="studio" ${s?.studio ? 'checked' : ''}> Proposer le Studio coupe 3D au client lors de la réservation</label></form>`,
+      <label class="check"><input type="checkbox" name="studio" ${s?.studio ? 'checked' : ''}> Proposer le Studio coupe 3D au client lors de la réservation</label>
+      <div class="field" style="margin-top:10px"><label>Rappel « c’est l’heure de revenir » après (semaines)</label><input name="rebook_weeks" type="number" min="0" max="52" value="${s?.rebook_weeks ?? 0}" style="max-width:120px"><div class="hint">0 = pas de rappel. Envoyé seulement si le client n’a rien réservé depuis.</div></div></form>`,
     actions: [{ id: 'close', label: 'Annuler', cls: 'btn-ghost' }, {
       id: 'save', label: 'Enregistrer', cls: 'btn-brand',
       handler: async (d) => {
@@ -663,13 +673,16 @@ async function renderReviews() {
 // =====================================================================
 async function renderAutomations() {
   const [notifs, waitlist] = await Promise.all([api(P('/notifications')), api(P('/waitlist'))]);
-  const KIND = { confirmation: 'Confirmation', reminder: 'Rappel J-1', rescheduled: 'Déplacement', cancelled: 'Annulation', review: 'Demande d’avis', new_booking_pro: 'Alerte salon', waitlist: 'Liste d’attente' };
+  const KIND = { rebook: 'Rappel retour', birthday: 'Anniversaire', gift_card: 'Carte cadeau', staff_invite: 'Invitation employé', confirmation: 'Confirmation', reminder: 'Rappel J-1', rescheduled: 'Déplacement', cancelled: 'Annulation', review: 'Demande d’avis', new_booking_pro: 'Alerte salon', waitlist: 'Liste d’attente' };
   const flows = [
     ['Confirmation instantanée', 'E-mail (+ SMS) au client dès la réservation, avec lien pour gérer et fichier agenda.'],
     ['Rappel 24 h avant', 'Réduit les absences de 60 à 80 %. Lien de déplacement en 1 clic inclus.'],
     ['Demande d’avis', 'Envoyée 2 h après le rendez-vous. Seuls les clients venus peuvent noter.'],
     ['Liste d’attente', 'Dès qu’un créneau se libère, les clients inscrits pour ce jour sont prévenus.'],
     ['Alerte nouvelle réservation', 'Vous êtes notifié à chaque réservation en ligne.'],
+    ['C’est l’heure de revenir', 'Après une coupe, une couleur ou des ongles, le client reçoit un rappel au bon moment (réglable par prestation) s’il n’a rien réservé.'],
+    ['Anniversaire', `Message avec votre cadeau le jour J${ctx.salon.birthday_offer ? ` : « ${esc(ctx.salon.birthday_offer)} »` : ' (désactivé dans Paramètres)'}.`],
+    ['Dernière minute', ctx.salon.lastminute_percent ? `−${ctx.salon.lastminute_percent} % automatique sur les créneaux libres dans les ${ctx.salon.lastminute_hours} h.` : 'Désactivé : réglez un pourcentage dans Paramètres pour remplir les trous de l’agenda.'],
     ['Fidélité', `1 point par franc crédité au client à l’encaissement${ctx.salon.loyalty_enabled ? '' : ' (désactivé dans Paramètres)'}.`],
   ];
   view.innerHTML = `${head('Automatisations', '<button class="btn btn-ghost" id="run-now">Exécuter maintenant</button>')}
@@ -721,6 +734,13 @@ async function renderSettings() {
           <div class="field"><label>Délai min. (min)</label><input name="min_notice_min" type="number" min="0" value="${s.min_notice_min}"></div>
           <div class="field"><label>Réservable à (jours)</label><input name="max_days_ahead" type="number" min="1" max="365" value="${s.max_days_ahead}"></div>
         </div>
+        <h3 style="margin-top:12px">Remplir l’agenda & fidéliser</h3>
+        <div class="grid-2">
+          <div class="field"><label>Offre dernière minute (%)</label><input name="lastminute_percent" type="number" min="0" max="50" value="${s.lastminute_percent}"><div class="hint">Remise automatique sur les créneaux encore libres. 0 = désactivé.</div></div>
+          <div class="field"><label>… dans les prochaines (heures)</label><input name="lastminute_hours" type="number" min="1" max="72" value="${s.lastminute_hours}"></div>
+        </div>
+        <div class="field"><label>Cadeau d’anniversaire envoyé aux clients</label><input name="birthday_offer" value="${esc(s.birthday_offer)}" placeholder="-15 % sur votre prochaine prestation"><div class="hint">E-mail envoyé le jour de l’anniversaire du client. Laisser vide pour désactiver.</div></div>
+        <label class="check"><input type="checkbox" name="giftcards_enabled" ${s.giftcards_enabled ? 'checked' : ''}> Vendre des cartes cadeaux en ligne</label>
         <label class="check"><input type="checkbox" name="loyalty_enabled" ${s.loyalty_enabled ? 'checked' : ''}> Programme de fidélité (1 point par franc)</label>
         <label class="check"><input type="checkbox" name="published" ${s.published ? 'checked' : ''}> Page visible sur la marketplace Lumea</label>
         <button class="btn btn-brand" style="margin-top:12px">Enregistrer</button>
@@ -741,6 +761,7 @@ async function renderSettings() {
     const f = formData(e.target);
     f.loyalty_enabled = !!f.loyalty_enabled;
     f.published = !!f.published;
+    f.giftcards_enabled = !!f.giftcards_enabled;
     try { await api(P('/salon'), { method: 'PUT', body: f }); toast('Paramètres enregistrés.'); await refreshCtx(); } catch (err) { toast(err.message, 'error'); }
   };
   api(P('/studio')).then((st) => {
