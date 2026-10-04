@@ -382,6 +382,13 @@ addColumn('salons', 'lastminute_percent', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('salons', 'lastminute_hours', 'INTEGER NOT NULL DEFAULT 24');
 addColumn('bookings', 'deal_percent', 'INTEGER NOT NULL DEFAULT 0');
 
+db.exec(`CREATE TABLE IF NOT EXISTS user_identities (
+  provider TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (provider, subject)
+)`);
 db.exec(`CREATE TABLE IF NOT EXISTS stripe_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
 
 /** Runs fn inside an IMMEDIATE transaction (serialises writers — prevents double booking). Re-entrant. */

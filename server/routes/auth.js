@@ -96,6 +96,60 @@ router.post('/reset', limiter, (req, res) => {
   res.json({ ok: true, role: one('SELECT role FROM users WHERE id = ?', row.user_id).role });
 });
 
+// ---- Social login (Google, Apple) ----
+const oauth = require('../oauth');
+const oauthStates = new Map(); // state -> { provider, nonce, next, exp } (single-instance, 10 min)
+
+router.get('/providers', (_req, res) => res.json(oauth.enabledProviders()));
+
+router.get('/oauth/:provider/start', (req, res) => {
+  const p = oauth.PROVIDERS[req.params.provider];
+  if (!p || !p.enabled()) throw new HttpError(404, 'Connexion indisponible.');
+  const state = randomToken(18);
+  const nonce = randomToken(18);
+  const next = /^\/[\w\-/#?=&.]*$/.test(req.query.next || '') ? req.query.next : '';
+  for (const [k, v] of oauthStates) if (v.exp < Date.now()) oauthStates.delete(k);
+  oauthStates.set(state, { provider: req.params.provider, nonce, next, exp: Date.now() + 10 * 60 * 1000 });
+  res.redirect(oauth.authorizeUrl(req.params.provider, { redirectUri: `${APP_URL}/api/auth/oauth/${req.params.provider}/callback`, state, nonce }));
+});
+
+async function oauthCallback(req, res) {
+  const params = { ...req.query, ...(req.body || {}) };
+  const saved = oauthStates.get(String(params.state || ''));
+  oauthStates.delete(String(params.state || ''));
+  const fail = (msg) => res.redirect(`/connexion?erreur=${encodeURIComponent(msg)}`);
+  if (!saved || saved.provider !== req.params.provider || saved.exp < Date.now()) return fail('La connexion a expiré, réessayez.');
+  if (params.error || !params.code) return fail('Connexion annulée.');
+  try {
+    const tokens = await oauth.exchangeCode(saved.provider, { code: String(params.code), redirectUri: `${APP_URL}/api/auth/oauth/${saved.provider}/callback` });
+    const claims = await oauth.verifyIdToken(saved.provider, tokens.id_token, saved.nonce);
+    const email = String(claims.email || '').toLowerCase();
+    const verified = claims.email_verified === true || claims.email_verified === 'true';
+    let userId = one('SELECT user_id FROM user_identities WHERE provider = ? AND subject = ?', saved.provider, String(claims.sub))?.user_id;
+    if (!userId) {
+      if (!EMAIL_RE.test(email) || !verified) return fail('Adresse e-mail non vérifiée par le fournisseur.');
+      const existing = one('SELECT id FROM users WHERE email = ?', email);
+      if (existing) userId = existing.id;
+      else {
+        // Apple sends the name only on the very first sign-in (form field "user").
+        let name = claims.name || [claims.given_name, claims.family_name].filter(Boolean).join(' ');
+        try { const u = JSON.parse(params.user || '{}'); name ||= [u.name?.firstName, u.name?.lastName].filter(Boolean).join(' '); } catch { /* ignore */ }
+        userId = Number(run("INSERT INTO users (email, password_hash, name, role) VALUES (?,?,?, 'client')", email, hashPassword(randomToken(24)), clean(name, 120) || email.split('@')[0]).lastInsertRowid);
+        run('UPDATE clients SET user_id = ? WHERE email = ? AND user_id IS NULL', userId, email);
+      }
+      run('INSERT OR IGNORE INTO user_identities (provider, subject, user_id) VALUES (?,?,?)', saved.provider, String(claims.sub), userId);
+    }
+    setSession(res, userId);
+    const role = one('SELECT role FROM users WHERE id = ?', userId).role;
+    res.redirect(saved.next || (role === 'pro' || role === 'staff' ? '/app' : role === 'admin' ? '/admin' : '/compte'));
+  } catch (err) {
+    console.error('[oauth]', err.message);
+    fail('Connexion impossible, réessayez ou utilisez votre e-mail.');
+  }
+}
+router.get('/oauth/:provider/callback', oauthCallback);
+router.post('/oauth/:provider/callback', express.urlencoded({ extended: false, limit: '20kb' }), oauthCallback);
+
 router.post('/logout', (_req, res) => {
   clearSession(res);
   res.json({ ok: true });
