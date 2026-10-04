@@ -5,7 +5,8 @@ const T = require('./time');
 const APP_URL = (process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`).replace(/\/$/, '');
 const WEBHOOK = process.env.NOTIFY_WEBHOOK_URL || '';
 
-const euros = (cents) => `${(cents / 100).toFixed(2).replace('.', ',')} €`;
+const { CURRENCY } = require('./plans');
+const euros = (cents) => new Intl.NumberFormat('fr-CH', { style: 'currency', currency: CURRENCY }).format(cents / 100);
 const frDate = (iso) => {
   const [date, time] = iso.split('T');
   const d = new Date(`${date}T12:00:00Z`);

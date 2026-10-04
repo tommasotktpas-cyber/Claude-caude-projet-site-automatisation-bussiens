@@ -1,8 +1,39 @@
 'use strict';
-// Public pricing. 0 % commission on every plan — the core argument against marketplaces (Treatwell 25 %, Fresha 20 %).
+// Public pricing (CHF, per establishment). 0 % commission on every plan —
+// the core argument against marketplaces (Treatwell 25 %, Fresha 20 %).
+const CURRENCY = process.env.CURRENCY || 'CHF';
+
 const PLANS = [
-  { id: 'starter', name: 'Solo', price_eur: 24, max_staff: 1, features: ['Réservation en ligne 24/7', 'Agenda & fiches clients', 'Rappels e-mail automatiques', 'Page salon + widget site web'] },
-  { id: 'pro', name: 'Pro', price_eur: 49, max_staff: 8, popular: true, features: ['Tout Solo', "Jusqu'à 8 collaborateurs", 'Acompte anti no-show', "Liste d'attente intelligente", 'Statistiques avancées', 'Programme de fidélité'] },
-  { id: 'business', name: 'Business', price_eur: 89, max_staff: 0, features: ['Tout Pro', 'Collaborateurs illimités', 'Webhooks & automatisations (Zapier, Make, n8n)', 'Export comptable', 'Support prioritaire'] },
+  {
+    id: 'essentiel', name: 'Essentiel', price: 100, max_staff: 0,
+    tagline: 'Tout pour gérer et remplir votre salon.',
+    features: [
+      'Réservation en ligne 24/7, 0 % de commission',
+      'Agenda multi-collaborateurs illimité',
+      'Rappels automatiques, liste d’attente, avis vérifiés',
+      'Acompte anti no-show & programme de fidélité',
+      'Fichier clients, statistiques, export',
+      'Votre propre site (modèle Classique inclus)',
+      'Modèles premium : 300 CHF une fois ou 20 CHF / mois',
+    ],
+  },
+  {
+    id: 'premium', name: 'Premium', price: 158, max_staff: 0, popular: true,
+    tagline: 'Un site personnalisé à votre image, en plus.',
+    features: [
+      'Tout Essentiel',
+      'Site personnalisé conçu pour vous par notre équipe',
+      'Tous les modèles premium inclus',
+      'Votre nom de domaine (www.votre-salon.ch)',
+      'Personnalisation avancée (CSS, sections)',
+      'Support prioritaire',
+    ],
+  },
 ];
-module.exports = { PLANS };
+
+/** Premium templates on the Essentiel plan. */
+const TEMPLATE_PRICING = { once: 300, monthly: 20 };
+
+const planById = (id) => PLANS.find((p) => p.id === id);
+
+module.exports = { PLANS, TEMPLATE_PRICING, CURRENCY, planById };

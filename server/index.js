@@ -6,6 +6,9 @@ const { sessionMiddleware, hashPassword } = require('./auth');
 const { runAutomations } = require('./notifications');
 const { buildIcs } = require('./ics');
 const T = require('./time');
+const { CURRENCY } = require('./plans');
+const sites = require('./sites');
+const { TEMPLATES } = require('./templates');
 
 function createApp() {
   const app = express();
@@ -22,12 +25,43 @@ function createApp() {
   app.use(express.json({ limit: '100kb' }));
   app.use(sessionMiddleware);
 
+  // Premium: a salon's own domain (www.mon-salon.ch) serves its website at "/".
+  app.get('/', (req, res, next) => {
+    const salon = sites.siteByDomain(req.hostname);
+    if (!salon) return next();
+    res.type('html').send(sites.renderSalonSite(salon));
+  });
+
+  app.get('/js/config.js', (_req, res) => {
+    res.type('application/javascript').send(`window.LUMEA_CONFIG = ${JSON.stringify({ currency: CURRENCY })};`);
+  });
+
+  // Each salon's own website.
+  app.get('/s/:slug', (req, res) => {
+    const salon = one('SELECT * FROM salons WHERE slug = ? AND published = 1', req.params.slug);
+    const site = salon && sites.ensureSite(salon.id);
+    if (!salon || !site.published) return res.status(404).type('html').send('<!doctype html><meta charset="utf-8"><title>Site introuvable</title><p style="font-family:system-ui;padding:40px">Ce site n’existe pas ou n’est pas encore publié. <a href="/">Retour</a></p>');
+    res.type('html').send(sites.renderSalonSite(salon));
+  });
+
+  // Public template showcase, rendered with the demo salon's data.
+  app.get('/modeles/:template', (req, res) => {
+    const tpl = TEMPLATES.find((t) => t.id === req.params.template);
+    const salon = one("SELECT * FROM salons WHERE published = 1 ORDER BY id LIMIT 1");
+    if (!tpl || !salon) return res.status(404).send('Not found');
+    res.type('html').send(sites.renderSalonSite(salon, { templateId: tpl.id, content: {}, customCss: '', preview: true }));
+  });
+  app.get('/api/templates', (_req, res) => res.json(sites.templateCatalog(null)));
+
   app.get('/api/health', (_req, res) => res.json({ ok: true, now: T.now().iso }));
   app.use('/api/auth', require('./routes/auth'));
   app.use('/api/public', require('./routes/public'));
   app.use('/api/pro', require('./routes/pro'));
   app.use('/api/admin', require('./routes/admin'));
-  app.get('/api/plans', (_req, res) => res.json(require('./plans').PLANS));
+  app.get('/api/plans', (_req, res) => {
+    const { PLANS, TEMPLATE_PRICING } = require('./plans');
+    res.json({ plans: PLANS, template_pricing: TEMPLATE_PRICING, currency: CURRENCY, templates: TEMPLATES.length });
+  });
 
   // Subscribable agenda feed (Google Calendar, Apple Calendar, Outlook).
   app.get('/api/ical/:token.ics', (req, res) => {

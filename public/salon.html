@@ -27,6 +27,7 @@
     <div class="drawer-foot hidden" id="drawer-foot"></div>
   </aside>
 
+  <script src="/js/config.js"></script>
   <script src="/js/common.js"></script>
   <script>
     'use strict';
@@ -110,6 +111,7 @@
               ${data.staff.length ? `<div><h3 style="font-size:1rem;margin-top:8px">L’équipe</h3><div class="team">
                 ${data.staff.map((p) => `<div class="row" style="gap:8px"><span class="avatar sm" style="--c:${esc(p.color)}">${esc(fmt.initials(p.name))}</span><div class="small"><b>${esc(p.name.split(' ')[0])}</b><div class="muted">${esc(p.title)}</div></div></div>`).join('')}
               </div></div>` : ''}
+              ${embed ? '' : `<a class="btn btn-ghost btn-block" href="/s/${encodeURIComponent(s.slug)}">Visiter le site du salon</a>`}
               <div class="small muted">${s.phone ? `Tél. <a href="tel:${esc(s.phone.replace(/\s/g, ''))}">${esc(s.phone)}</a>` : ''}</div>
             </div>
           </aside>
@@ -119,7 +121,12 @@
     // ---------------- Booking drawer ----------------
     const drawer = $('#drawer');
     const openDrawer = () => { drawer.classList.add('open'); $('#backdrop').classList.add('open'); document.body.style.overflow = 'hidden'; };
-    const closeDrawer = () => { drawer.classList.remove('open'); $('#backdrop').classList.remove('open'); document.body.style.overflow = ''; };
+    const inModal = params.get('modal') === '1' && window.parent !== window;
+    const closeDrawer = () => {
+      // Inside a salon website's booking pop-up: closing the drawer closes the pop-up.
+      if (inModal) { window.parent.postMessage({ lumea: 'close' }, location.origin); return; }
+      drawer.classList.remove('open'); $('#backdrop').classList.remove('open'); document.body.style.overflow = '';
+    };
     $('#drawer-close').onclick = closeDrawer;
     $('#backdrop').onclick = closeDrawer;
     addEventListener('keydown', (e) => e.key === 'Escape' && closeDrawer());
@@ -340,11 +347,18 @@
         $('#page').innerHTML = `<div class="narrow empty" style="padding:120px 0"><h2>Salon introuvable</h2><p>${esc(err.message)}</p><a class="btn" href="/">Retour à l’accueil</a></div>`;
         return;
       }
-      document.documentElement.style.setProperty('--brand', data.salon.accent);
-      document.documentElement.style.setProperty('--brand-soft', `color-mix(in srgb, ${data.salon.accent} 14%, #fff)`);
+      // The salon's website passes its template colour so the booking pop-up matches the site.
+      const accent = /^[0-9a-f]{6}$/i.test(params.get('accent') || '') ? `#${params.get('accent')}` : data.salon.accent;
+      document.documentElement.style.setProperty('--brand', accent);
+      document.documentElement.style.setProperty('--brand-soft', `color-mix(in srgb, ${accent} 14%, #fff)`);
+      if (inModal) document.body.classList.add('in-modal');
       render();
       const pre = Number(params.get('service'));
-      if (pre && data.services.some((s) => s.id === pre)) {
+      if (params.get('book') === '1') {
+        bk.service = null;
+        go(1);
+        openDrawer();
+      } else if (pre && data.services.some((s) => s.id === pre)) {
         bk.service = data.services.find((s) => s.id === pre);
         if (params.get('date')) bk.date = params.get('date');
         go(3);

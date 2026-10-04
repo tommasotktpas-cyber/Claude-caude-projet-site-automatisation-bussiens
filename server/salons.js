@@ -28,6 +28,8 @@ function createSalon(ownerId, data) {
     T.addDays(T.now().date, TRIAL_DAYS), data.deposit_percent || 0, randomToken(),
   ).lastInsertRowid);
 
+  run('INSERT INTO sites (salon_id, template, content) VALUES (?,?,?)', salonId, data.template || 'classique', JSON.stringify(data.site_content || {}));
+
   for (const h of data.hours || DEFAULT_HOURS) {
     run('INSERT INTO opening_hours (salon_id, weekday, open, close) VALUES (?,?,?,?)', salonId, h.weekday, h.open, h.close);
   }

@@ -3,15 +3,18 @@ const { db, one, all, run, tx } = require('./db');
 const { hashPassword, randomToken } = require('./auth');
 const { createSalon } = require('./salons');
 const T = require('./time');
+const { TEMPLATE_PRICING } = require('./plans');
 
-const eur = (n) => Math.round(n * 100);
+// Swiss price level (CHF), rounded to the franc.
+const eur = (n) => Math.round(n * 1.25) * 100;
 const wk = (days, open, close) => days.map((weekday) => ({ weekday, open, close }));
 const TUE_SAT = [2, 3, 4, 5, 6];
 const MON_SAT = [1, 2, 3, 4, 5, 6];
 
 const SALONS = [
   {
-    name: 'Maison Céleste', category: 'coiffure', city: 'Luxembourg', zip: 'L-1450', address: '12 Grand-Rue', accent: '#7c3aed',
+    name: 'Maison Céleste', category: 'coiffure', city: 'Genève', zip: '1204', address: 'Rue du Rhône 42', accent: '#7c3aed', template: 'elegance', plan: 'premium', phone: '+41 22 310 42 00',
+    site_content: { announcement: 'Nouveau : rituel kératine bio — offert le diagnostic en octobre', about_title: 'Une maison de coiffure, pas une usine', socials: { instagram: '@maisonceleste.geneve', whatsapp: '+41 79 310 42 00' } },
     description: 'Salon de coiffure haut de gamme au cœur de la ville. Coupes sur-mesure, balayages naturels et soins profonds à la kératine, dans un cadre lumineux et apaisant.',
     deposit_percent: 20, hours: wk(TUE_SAT, '09:00', '19:00'),
     services: [
@@ -30,7 +33,7 @@ const SALONS = [
     ],
   },
   {
-    name: 'Le Barbier du Quai', category: 'barbier', city: 'Luxembourg', zip: 'L-2240', address: '3 Rue Notre-Dame', accent: '#b45309',
+    name: 'Le Barbier du Quai', category: 'barbier', city: 'Lausanne', zip: '1003', address: 'Rue de Bourg 8', accent: '#b45309', template: 'urbain', plan: 'essentiel', license: 'once', phone: '+41 21 320 08 08',
     description: 'Barbier traditionnel : taille de barbe à l’ancienne, rasage serviette chaude, dégradés précis. Café offert.',
     hours: wk(MON_SAT, '09:30', '20:00'),
     services: [
@@ -42,7 +45,7 @@ const SALONS = [
     staff: [{ name: 'Karim Benali', title: 'Maître barbier' }, { name: 'Lucas Weber', title: 'Barbier' }],
   },
   {
-    name: 'Atelier Nacre', category: 'ongles', city: 'Esch-sur-Alzette', zip: 'L-4002', address: '45 Rue de l’Alzette', accent: '#db2777',
+    name: 'Atelier Nacre', category: 'ongles', city: 'Fribourg', zip: '1700', address: 'Rue de Romont 15', accent: '#db2777', template: 'pop', plan: 'essentiel', license: 'monthly', phone: '+41 26 322 15 15',
     description: 'Onglerie & nail art. Semi-permanent, gainage, extensions gel et soins des mains, avec des produits vegan.',
     hours: wk(TUE_SAT, '10:00', '19:00'),
     services: [
@@ -55,8 +58,8 @@ const SALONS = [
     staff: [{ name: 'Sofia Ricci', title: 'Prothésiste ongulaire' }, { name: 'Léa Schmit', title: 'Nail artist' }],
   },
   {
-    name: 'Spa Altitude', category: 'spa', city: 'Bruxelles', zip: '1050', address: '210 Avenue Louise', accent: '#0d9488',
-    description: 'Spa urbain : massages, soins du visage experts et rituels hammam. Une parenthèse de calme en plein Ixelles.',
+    name: 'Spa Altitude', category: 'spa', city: 'Montreux', zip: '1820', address: 'Grand-Rue 70', accent: '#0d9488', template: 'zen', plan: 'premium', phone: '+41 21 963 70 70',
+    description: 'Spa urbain : massages, soins du visage experts et rituels hammam. Une parenthèse de calme face au Léman.',
     deposit_percent: 30, hours: wk([1, 2, 3, 4, 5, 6, 0], '10:00', '21:00'),
     services: [
       { name: 'Massage relaxant 60 min', category: 'Massages', duration_min: 60, price_cents: eur(85) },
@@ -68,7 +71,7 @@ const SALONS = [
     staff: [{ name: 'Nora El Amrani', title: 'Praticienne bien-être' }, { name: 'Julien Dubois', title: 'Masseur' }, { name: 'Emma Peeters', title: 'Esthéticienne', services: [3, 4] }],
   },
   {
-    name: 'Institut Belle Rive', category: 'esthetique', city: 'Liège', zip: '4000', address: '8 Quai de la Batte', accent: '#e11d48',
+    name: 'Institut Belle Rive', category: 'esthetique', city: 'Neuchâtel', zip: '2000', address: 'Rue du Seyon 12', accent: '#e11d48', template: 'classique', plan: 'essentiel', phone: '+41 32 725 12 12',
     description: 'Institut de beauté : épilations, soins visage, rehaussement de cils et maquillage. Accueil chaleureux depuis 2012.',
     hours: wk(TUE_SAT, '09:00', '18:30'),
     services: [
@@ -81,7 +84,7 @@ const SALONS = [
     staff: [{ name: 'Charlotte Lambert', title: 'Esthéticienne' }],
   },
   {
-    name: 'Studio Mèche Rebelle', category: 'coiffure', city: 'Bruxelles', zip: '1000', address: '27 Rue Antoine Dansaert', accent: '#2563eb',
+    name: 'Studio Mèche Rebelle', category: 'coiffure', city: 'Genève', zip: '1205', address: 'Boulevard Carl-Vogt 33', accent: '#2563eb', template: 'minimal', plan: 'trial', phone: '+41 22 329 33 33',
     description: 'Coiffure créative et engagée : couleurs vives, coupes texturées, coiffage afro et bouclé. Tarifs non genrés.',
     hours: wk([2, 3, 4, 5, 6], '10:00', '20:00'),
     services: [
@@ -93,7 +96,7 @@ const SALONS = [
     staff: [{ name: 'Alex Janssens', title: 'Coiffeur·euse' }, { name: 'Maya Diallo', title: 'Spécialiste boucles' }],
   },
   {
-    name: 'Zen Massage Namur', category: 'massage', city: 'Namur', zip: '5000', address: '15 Rue de Fer', accent: '#16a34a',
+    name: 'Zen Massage Sion', category: 'massage', city: 'Sion', zip: '1950', address: 'Rue du Grand-Pont 18', accent: '#16a34a', template: 'nature', plan: 'essentiel', license: 'once', phone: '+41 27 322 18 18',
     description: 'Massages bien-être : californien, suédois, réflexologie plantaire et massage femme enceinte.',
     hours: wk([1, 2, 3, 4, 5], '09:00', '20:00'),
     services: [
@@ -104,7 +107,7 @@ const SALONS = [
     staff: [{ name: 'Thomas Lejeune', title: 'Praticien certifié' }],
   },
   {
-    name: 'Barber Club Esch', category: 'barbier', city: 'Esch-sur-Alzette', zip: 'L-4040', address: '2 Place de la Résistance', accent: '#475569',
+    name: 'Barber Club Lausanne', category: 'barbier', city: 'Lausanne', zip: '1004', address: 'Avenue de France 5', accent: '#475569', template: 'neon', plan: 'trial', phone: '+41 21 624 05 05',
     description: 'Barber shop moderne, dégradés américains et designs. Sans rendez-vous le samedi matin, ou réservez en ligne.',
     hours: wk(MON_SAT, '10:00', '19:00'),
     services: [
@@ -151,17 +154,20 @@ function seed() {
     SALONS.forEach((def, idx) => {
       const email = idx === 0 ? 'demo@lumea.app' : `pro${idx}@lumea.app`;
       const ownerId = Number(run("INSERT INTO users (email, password_hash, name, role) VALUES (?,?,?, 'pro')", email, demoPassword, def.staff[0].name).lastInsertRowid);
-      const salon = createSalon(ownerId, { ...def, email, phone: '+352 26 00 00 0' + idx });
-      run('UPDATE salons SET plan = ? WHERE id = ?', idx === 0 ? 'pro' : ['pro', 'starter', 'business', 'trial'][idx % 4], salon.id);
+      const salon = createSalon(ownerId, { ...def, email });
+      run('UPDATE salons SET plan = ? WHERE id = ?', def.plan, salon.id);
+      if (def.license) {
+        run('INSERT INTO template_licenses (salon_id, template, billing, price_chf) VALUES (?,?,?,?)', salon.id, def.template, def.license, TEMPLATE_PRICING[def.license]);
+      }
 
       const services = all('SELECT * FROM services WHERE salon_id = ?', salon.id);
       const staff = all('SELECT id FROM staff WHERE salon_id = ?', salon.id).map((s) => s.id);
       const hours = all('SELECT * FROM opening_hours WHERE salon_id = ?', salon.id);
       const clients = Array.from({ length: 24 }, (_, i) => {
         const name = `${pick(FIRST)} ${pick(LAST)}`;
-        const mail = `${name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, '.')}.${i}@exemple.lu`;
+        const mail = `${name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, '.')}.${i}@exemple.ch`;
         return Number(run('INSERT INTO clients (salon_id, name, email, phone, marketing_opt_in) VALUES (?,?,?,?,?)',
-          salon.id, name, mail, `+352 691 ${String(100000 + Math.floor(rand() * 899999))}`, rand() > 0.5 ? 1 : 0).lastInsertRowid);
+          salon.id, name, mail, `+41 79 ${String(100 + Math.floor(rand() * 899))} ${String(10 + Math.floor(rand() * 89))} ${String(10 + Math.floor(rand() * 89))}`, rand() > 0.5 ? 1 : 0).lastInsertRowid);
       });
 
       // Bookings from 60 days ago to 14 days ahead, without overlaps per staff member.
@@ -215,7 +221,7 @@ function seed() {
 }
 
 function reset() {
-  db.exec(`DELETE FROM notifications; DELETE FROM waitlist; DELETE FROM reviews; DELETE FROM bookings; DELETE FROM clients;
+  db.exec(`DELETE FROM notifications; DELETE FROM design_requests; DELETE FROM template_licenses; DELETE FROM sites; DELETE FROM waitlist; DELETE FROM reviews; DELETE FROM bookings; DELETE FROM clients;
            DELETE FROM time_off; DELETE FROM staff_services; DELETE FROM staff_hours; DELETE FROM staff; DELETE FROM services;
            DELETE FROM opening_hours; DELETE FROM salons; DELETE FROM users WHERE role != 'admin';`);
 }

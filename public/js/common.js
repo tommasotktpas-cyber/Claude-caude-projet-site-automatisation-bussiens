@@ -23,8 +23,9 @@ async function api(path, { method = 'GET', body, raw = false } = {}) {
   return data;
 }
 
+const CURRENCY = (window.LUMEA_CONFIG && window.LUMEA_CONFIG.currency) || 'CHF';
 const fmt = {
-  eur: (cents) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: cents % 100 ? 2 : 0 }).format((cents || 0) / 100),
+  eur: (cents) => new Intl.NumberFormat('fr-CH', { style: 'currency', currency: CURRENCY, minimumFractionDigits: cents % 100 ? 2 : 0 }).format((cents || 0) / 100),
   duration: (min) => (min < 60 ? `${min} min` : `${Math.floor(min / 60)} h${min % 60 ? ` ${String(min % 60).padStart(2, '0')}` : ''}`),
   date: (iso, opts = { weekday: 'long', day: 'numeric', month: 'long' }) => {
     const s = new Date(`${iso.slice(0, 10)}T12:00:00Z`).toLocaleDateString('fr-FR', { ...opts, timeZone: 'UTC' });
@@ -151,7 +152,7 @@ async function mountChrome() {
           <div><a class="logo" href="/"><span class="logo-mark" aria-hidden="true"></span>Lumea</a>
             <p style="margin-top:12px;max-width:320px">La réservation beauté sans commission. Pensée pour les salons indépendants, adorée par leurs clients.</p></div>
           <div><h4>Clients</h4><a href="/#salons">Trouver un salon</a><a href="/connexion">Mon compte</a></div>
-          <div><h4>Professionnels</h4><a href="/pro">Fonctionnalités</a><a href="/pro#tarifs">Tarifs</a><a href="/connexion?pro=1">Créer mon salon</a></div>
+          <div><h4>Professionnels</h4><a href="/pro">Fonctionnalités</a><a href="/pro#modeles">Modèles de site</a><a href="/pro#tarifs">Tarifs</a><a href="/connexion?pro=1">Créer mon salon</a></div>
           <div><h4>Lumea</h4><a href="/mentions">Mentions légales</a><a href="/mentions#cgu">CGU</a><a href="/mentions#rgpd">Confidentialité</a></div>
         </div>
         <p style="margin-top:32px">© ${new Date().getFullYear()} Lumea. Tous droits réservés.</p>
@@ -169,4 +170,14 @@ async function mountChrome() {
   } catch {
     return null;
   }
+}
+
+/** Scales full-size iframe previews (1280px wide) down to their thumbnail container. */
+function scaleThumbs(root = document) {
+  const apply = (box) => {
+    const f = box.querySelector('iframe');
+    if (f) f.style.transform = `scale(${box.clientWidth / 1280})`;
+  };
+  const ro = new ResizeObserver((entries) => entries.forEach((e) => apply(e.target)));
+  root.querySelectorAll('.tpl-thumb').forEach((b) => { apply(b); ro.observe(b); });
 }

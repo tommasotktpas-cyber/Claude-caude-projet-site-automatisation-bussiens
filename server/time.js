@@ -2,7 +2,7 @@
 // All appointment times are stored as salon-local wall-clock strings: "YYYY-MM-DDTHH:MM".
 // This keeps the agenda readable and avoids DST drift for a single-timezone business.
 
-const TZ = process.env.APP_TZ || 'Europe/Luxembourg';
+const TZ = process.env.APP_TZ || 'Europe/Zurich';
 
 const pad = (n) => String(n).padStart(2, '0');
 const toMin = (hhmm) => {

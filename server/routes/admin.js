@@ -3,7 +3,7 @@ const express = require('express');
 const { one, all, run } = require('../db');
 const { requireRole } = require('../auth');
 const { HttpError } = require('../bookings');
-const { PLANS } = require('../plans');
+const { PLANS, TEMPLATE_PRICING, CURRENCY } = require('../plans');
 const T = require('../time');
 
 const router = express.Router();
@@ -13,22 +13,40 @@ router.get('/overview', (_req, res) => {
   const salons = all(
     `SELECT s.id, s.name, s.slug, s.city, s.category, s.plan, s.trial_ends_at, s.published, s.created_at, u.email AS owner_email,
             (SELECT COUNT(*) FROM bookings b WHERE b.salon_id = s.id) AS bookings,
-            (SELECT COUNT(*) FROM staff st WHERE st.salon_id = s.id AND st.active = 1) AS staff
-     FROM salons s JOIN users u ON u.id = s.owner_id ORDER BY s.created_at DESC`,
+            (SELECT COUNT(*) FROM staff st WHERE st.salon_id = s.id AND st.active = 1) AS staff,
+            x.template, x.published AS site_published, x.custom_domain,
+            (SELECT COUNT(*) FROM template_licenses l WHERE l.salon_id = s.id AND l.active = 1) AS licenses
+     FROM salons s LEFT JOIN sites x ON x.salon_id = s.id JOIN users u ON u.id = s.owner_id ORDER BY s.created_at DESC`,
   );
-  const price = Object.fromEntries(PLANS.map((p) => [p.id, p.price_eur]));
+  const price = Object.fromEntries(PLANS.map((p) => [p.id, p.price]));
   const paying = salons.filter((s) => price[s.plan]);
+  const lic = one(`SELECT COALESCE(SUM(price_chf) FILTER (WHERE billing = 'monthly' AND active = 1), 0) AS monthly,
+                          COALESCE(SUM(price_chf) FILTER (WHERE billing = 'once'), 0) AS once,
+                          COUNT(*) FILTER (WHERE active = 1) AS active FROM template_licenses`);
+  const plansMrr = paying.reduce((sum, s) => sum + price[s.plan], 0);
   res.json({
     salons,
     kpis: {
       salons: salons.length,
       paying: paying.length,
       trials: salons.filter((s) => s.plan === 'trial').length,
-      mrr_eur: paying.reduce((sum, s) => sum + price[s.plan], 0),
+      mrr: plansMrr + lic.monthly,
+      mrr_plans: plansMrr,
+      mrr_templates: lic.monthly,
+      templates_once_total: lic.once,
+      licenses_active: lic.active,
+      premium: salons.filter((s) => s.plan === 'premium').length,
+      essentiel: salons.filter((s) => s.plan === 'essentiel').length,
       bookings_30d: one('SELECT COUNT(*) AS n FROM bookings WHERE created_at >= ?', `${T.addDays(T.now().date, -30)} 00:00:00`).n,
       users: one("SELECT COUNT(*) AS n FROM users WHERE role = 'client'").n,
     },
     plans: PLANS,
+    currency: CURRENCY,
+    template_pricing: TEMPLATE_PRICING,
+    design_requests: all(
+      `SELECT d.*, s.name AS salon_name, s.slug, u.email AS owner_email FROM design_requests d
+       JOIN salons s ON s.id = d.salon_id JOIN users u ON u.id = s.owner_id ORDER BY d.status = 'livre', d.created_at DESC`,
+    ),
   });
 });
 
@@ -38,6 +56,15 @@ router.patch('/salons/:id', (req, res) => {
   const { plan, published } = req.body || {};
   if (plan !== undefined && !['trial', ...PLANS.map((p) => p.id)].includes(plan)) throw new HttpError(400, 'Formule inconnue.');
   run('UPDATE salons SET plan = ?, published = ? WHERE id = ?', plan ?? s.plan, published === undefined ? s.published : (published ? 1 : 0), s.id);
+  res.json({ ok: true });
+});
+
+router.patch('/design-requests/:id', (req, res) => {
+  const d = one('SELECT * FROM design_requests WHERE id = ?', Number(req.params.id));
+  if (!d) throw new HttpError(404, 'Demande introuvable.');
+  const status = req.body?.status ?? d.status;
+  if (!['nouveau', 'en_cours', 'livre'].includes(status)) throw new HttpError(400, 'Statut invalide.');
+  run('UPDATE design_requests SET status = ?, admin_note = ? WHERE id = ?', status, String(req.body?.admin_note ?? d.admin_note).slice(0, 2000), d.id);
   res.json({ ok: true });
 });
 

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Lumea Pro — Logiciel de réservation pour salons, sans commission</title>
-  <meta name="description" content="Agenda en ligne, réservation 24/7, rappels SMS, acompte anti no-show, liste d'attente et statistiques. 0 % de commission. Dès 24 €/mois, 30 jours offerts.">
+  <meta name="description" content="Agenda en ligne, réservation 24/7, rappels SMS, acompte anti no-show, liste d'attente et statistiques. 0 % de commission. Votre propre site inclus. Dès 100 CHF/mois, 30 jours offerts.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="/css/app.css">
@@ -28,7 +28,7 @@
         <div class="card" style="padding:18px;box-shadow:var(--shadow-lg)" aria-hidden="true">
           <div class="row between" style="margin-bottom:12px"><b>Aujourd’hui</b><span class="badge badge-ok">+3 réservations en ligne</span></div>
           <div class="kpis" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
-            <div class="kpi"><div class="label">CA du mois</div><div class="value" style="font-size:1.4rem">8 420 €</div></div>
+            <div class="kpi"><div class="label">CA du mois</div><div class="value" style="font-size:1.4rem">12 640 CHF</div></div>
             <div class="kpi"><div class="label">Remplissage</div><div class="value" style="font-size:1.4rem">87 %</div></div>
             <div class="kpi"><div class="label">No-show</div><div class="value" style="font-size:1.4rem">1,2 %</div></div>
           </div>
@@ -43,6 +43,7 @@
       <div class="section-head"><div class="eyebrow">Tout-en-un</div><h2>Tout ce qu’il faut pour gérer votre salon. Rien de superflu.</h2></div>
       <div class="features">
         <div class="card feature"><div class="ico" data-icon="cal"></div><h3>Agenda multi-collaborateurs</h3><p class="muted">Vue jour par collaborateur, horaires individuels, congés, temps de battement entre deux clients. Synchronisé avec Google / Apple Calendar.</p></div>
+        <div class="card feature"><div class="ico" data-icon="ext"></div><h3>Votre propre site internet</h3><p class="muted">Chaque salon a son site : 10 modèles professionnels, vos textes, vos couleurs, vos photos, la réservation intégrée. Domaine personnalisé en Premium.</p></div>
         <div class="card feature"><div class="ico" data-icon="clock"></div><h3>Réservation en ligne 24/7</h3><p class="muted">Votre page salon + un widget à coller sur votre site, Instagram ou Google. Seuls les vrais créneaux libres sont proposés.</p></div>
         <div class="card feature"><div class="ico" data-icon="card"></div><h3>Acompte anti no-show</h3><p class="muted">Demandez 10 à 50 % à la réservation. Les absences chutent, et le créneau perdu est quand même payé.</p></div>
         <div class="card feature"><div class="ico" data-icon="bolt"></div><h3>Automatisations</h3><p class="muted">Confirmation, rappel 24 h avant (e-mail + SMS), demande d’avis après la visite, alerte liste d’attente. Webhooks vers Zapier, Make, n8n.</p></div>
@@ -59,7 +60,8 @@
           <thead><tr><th></th><th class="us">Lumea</th><th>Marketplaces beauté</th><th>Logiciels traditionnels</th></tr></thead>
           <tbody>
             <tr><td>Commission sur nouveaux clients</td><td class="us yes">0 %</td><td class="no">20 – 25 %</td><td>0 %</td></tr>
-            <tr><td>Abonnement mensuel</td><td class="us">dès 24 €</td><td>dès 0 – 30 €</td><td>50 – 200 €</td></tr>
+            <tr><td>Abonnement mensuel</td><td class="us">100 CHF tout inclus</td><td>0 – 30 € + commissions</td><td>50 – 200 € selon modules</td></tr>
+            <tr><td>Site internet propre au salon</td><td class="us yes">✓ 10 modèles</td><td class="no">—</td><td>Option payante</td></tr>
             <tr><td>Engagement</td><td class="us yes">Aucun</td><td>Variable</td><td class="no">12 mois fréquent</td></tr>
             <tr><td>Acompte / empreinte anti no-show</td><td class="us yes">✓</td><td class="yes">✓</td><td>Option payante</td></tr>
             <tr><td>Liste d’attente automatique</td><td class="us yes">✓</td><td class="no">—</td><td class="no">—</td></tr>
@@ -75,13 +77,19 @@
           <b class="display" style="font-size:2rem;color:var(--danger)" id="calc-out">—</b></div>
         <div class="grid-2" style="margin-top:12px;align-items:end">
           <div><label for="calc-n">Nouveaux clients / mois : <span id="calc-n-v">20</span></label><input type="range" id="calc-n" min="5" max="120" value="20" style="padding:0"></div>
-          <div><label for="calc-t">Ticket moyen : <span id="calc-t-v">60</span> €</label><input type="range" id="calc-t" min="20" max="200" value="60" step="5" style="padding:0"></div>
+          <div><label for="calc-t">Ticket moyen : <span id="calc-t-v">80</span> CHF</label><input type="range" id="calc-t" min="20" max="250" value="80" step="5" style="padding:0"></div>
         </div>
       </div>
     </section>
 
+    <section class="section container" id="modeles" style="scroll-margin-top:80px">
+      <div class="section-head"><div class="eyebrow">Votre site internet</div><h2>Chaque salon a son propre site. Choisissez votre style.</h2>
+        <p class="muted">Le modèle Classique est inclus dans toutes les formules. Les modèles premium coûtent <b id="tpl-price">300 CHF une fois ou 20 CHF / mois</b>, et ils sont tous inclus en Premium, avec un design sur mesure.</p></div>
+      <div class="tpl-grid" id="templates"></div>
+    </section>
+
     <section class="section container" id="tarifs" style="scroll-margin-top:80px">
-      <div class="section-head center" style="margin-inline:auto"><div class="eyebrow">Tarifs</div><h2>Simple, transparent, sans commission.</h2><p class="muted">Tous les prix HT, par établissement. Changez de formule à tout moment.</p></div>
+      <div class="section-head center" style="margin-inline:auto"><div class="eyebrow">Tarifs</div><h2>Simple, transparent, sans commission.</h2><p class="muted">Prix en CHF HT, par établissement. Sans engagement, changez de formule à tout moment.</p></div>
       <div class="pricing" id="plans"></div>
     </section>
 
@@ -99,6 +107,8 @@
     <section class="section narrow">
       <h2 class="center">Questions fréquentes</h2>
       <details class="faq"><summary>Prenez-vous une commission sur les réservations ?</summary><p>Non, jamais. Vous payez un abonnement fixe, que vous ayez 10 ou 1 000 réservations dans le mois. Les clients trouvés via la marketplace Lumea sont aussi sans commission.</p></details>
+      <details class="faq"><summary>Quelle différence entre Essentiel et Premium ?</summary><p>Les deux incluent toute la gestion du salon et votre propre site. Premium ajoute un site personnalisé conçu avec vous par notre équipe, tous les modèles premium, votre nom de domaine (www.votre-salon.ch), la personnalisation avancée et le retrait de la mention Lumea.</p></details>
+      <details class="faq"><summary>Comment fonctionnent les modèles premium ?</summary><p>En Essentiel, chaque modèle premium s’achète 300 CHF une fois (il vous appartient définitivement) ou se loue 20 CHF par mois, résiliable à tout moment. En Premium, ils sont tous inclus.</p></details>
       <details class="faq"><summary>Puis-je importer mes clients existants ?</summary><p>Oui. Envoyez-nous votre fichier (Excel, CSV ou export de votre logiciel actuel), nous l’importons gratuitement sous 48 h.</p></details>
       <details class="faq"><summary>Comment fonctionne l’acompte ?</summary><p>Vous choisissez un pourcentage (par exemple 20 %). Le client le règle à la réservation ; il est déduit du prix final et remboursé si l’annulation respecte votre délai.</p></details>
       <details class="faq"><summary>Les SMS de rappel sont-ils inclus ?</summary><p>Les e-mails sont illimités. Les SMS sont envoyés via votre fournisseur (Twilio, Brevo…) connecté par webhook, au prix coûtant de l’opérateur.</p></details>
@@ -107,6 +117,7 @@
     </section>
   </main>
   <footer id="site-footer"></footer>
+  <script src="/js/config.js"></script>
   <script src="/js/common.js"></script>
   <script>
     'use strict';
@@ -114,16 +125,37 @@
     mountChrome();
     if (matchMedia('(max-width: 900px)').matches) $('#hero-grid').style.gridTemplateColumns = '1fr';
 
-    api('/api/plans').then((plans) => {
+    api('/api/plans').then(({ plans, template_pricing: tp, currency }) => {
+      $('#tpl-price').textContent = `${tp.once} ${currency} une fois ou ${tp.monthly} ${currency} / mois`;
       $('#plans').innerHTML = plans.map((p) => `
         <div class="card pad-lg plan ${p.popular ? 'popular' : ''}">
-          ${p.popular ? '<span class="ribbon">Le plus choisi</span>' : ''}
+          ${p.popular ? '<span class="ribbon">Site personnalisé</span>' : ''}
           <h3>${esc(p.name)}</h3>
-          <div><span class="price">${p.price_eur} €</span><span class="muted"> / mois</span></div>
-          <p class="muted small" style="margin:4px 0 0">${p.max_staff ? `${p.max_staff === 1 ? '1 collaborateur' : `Jusqu’à ${p.max_staff} collaborateurs`}` : 'Collaborateurs illimités'}</p>
+          <div><span class="price">${p.price}</span><span class="muted"> ${currency} / mois</span></div>
+          <p class="muted small" style="margin:4px 0 0">${esc(p.tagline)}</p>
           <ul>${p.features.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>
           <a class="btn ${p.popular ? 'btn-brand' : 'btn-ghost'} btn-block" href="/connexion?pro=1&plan=${p.id}">Essayer 30 jours gratuits</a>
+        </div>`).join('') + `
+        <div class="card pad-lg plan" style="background:var(--surface-2)">
+          <h3>Modèles premium</h3>
+          <div><span class="price">${tp.once}</span><span class="muted"> ${currency} une fois</span></div>
+          <p class="muted small" style="margin:4px 0 0">ou <b>${tp.monthly} ${currency} / mois</b>, sans engagement</p>
+          <ul><li>9 designs premium au choix</li><li>Vos textes, couleurs, photos et réseaux</li><li>Réservation intégrée au site</li><li>Inclus dans la formule Premium</li></ul>
+          <a class="btn btn-ghost btn-block" href="#modeles">Voir les modèles</a>
+        </div>`;
+    });
+
+    api('/api/templates').then((list) => {
+      $('#templates').innerHTML = list.map((t) => `
+        <div class="card tpl-card">
+          <div class="tpl-thumb"><iframe src="/modeles/${t.id}" loading="lazy" tabindex="-1" title="Aperçu ${esc(t.name)}"></iframe></div>
+          <div class="tpl-body">
+            <div class="row between"><b>${esc(t.name)}</b>${t.free ? '<span class="badge badge-ok">Inclus</span>' : '<span class="badge">Premium</span>'}</div>
+            <p class="small muted" style="margin:6px 0 10px">${esc(t.description)}</p>
+            <a class="small" href="/modeles/${t.id}" target="_blank" rel="noopener">Voir en grand →</a>
+          </div>
         </div>`).join('');
+      scaleThumbs();
     });
 
     function calc() {
@@ -131,7 +163,7 @@
       const t = Number($('#calc-t').value);
       $('#calc-n-v').textContent = n;
       $('#calc-t-v').textContent = t;
-      $('#calc-out').textContent = `${Math.round(n * t * 0.25 * 12).toLocaleString('fr-FR')} € / an`;
+      $('#calc-out').textContent = `${Math.round(n * t * 0.25 * 12).toLocaleString('fr-CH')} CHF / an`;
     }
     $('#calc-n').oninput = calc;
     $('#calc-t').oninput = calc;

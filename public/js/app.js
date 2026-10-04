@@ -694,11 +694,11 @@ async function renderBilling() {
     <div class="pricing">${plans.map((p) => `
       <div class="card pad-lg plan ${p.id === s.plan ? 'popular' : ''}">
         ${p.id === s.plan ? '<span class="ribbon">Votre formule</span>' : p.popular ? '<span class="ribbon" style="background:var(--ink)">Recommandé</span>' : ''}
-        <h3>${esc(p.name)}</h3><div><span class="price">${p.price_eur} €</span><span class="muted"> HT / mois</span></div>
+        <h3>${esc(p.name)}</h3><div><span class="price">${p.price}</span><span class="muted"> ${CURRENCY} HT / mois</span></div><p class="small muted" style="margin:4px 0 0">${esc(p.tagline || '')}</p>
         <ul>${p.features.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>
         <button class="btn ${p.id === s.plan ? 'btn-ghost' : 'btn-brand'} btn-block" data-plan="${p.id}" ${p.id === s.plan ? 'disabled' : ''}>${p.id === s.plan ? 'Formule active' : 'Choisir'}</button>
       </div>`).join('')}</div>
-    <p class="small muted" style="margin-top:14px">Facturation mensuelle, résiliable à tout moment. Le paiement par carte (Stripe) s’active en production — voir README.</p>`;
+    <p class="small muted" style="margin-top:14px">Facturation mensuelle, résiliable à tout moment. Modèles de site premium : gérés dans <a href="#site">Mon site</a>. Le paiement par carte (Stripe) s’active en production — voir README.</p>`;
   view.querySelectorAll('[data-plan]').forEach((b) => {
     b.onclick = async () => {
       await api(P('/plan'), { method: 'POST', body: { plan: b.dataset.plan } });
@@ -708,12 +708,224 @@ async function renderBilling() {
   });
 }
 
+
+// =====================================================================
+// Website editor (each salon has its own site)
+// =====================================================================
+const siteState = { data: null, draft: null, tab: 'modele', device: 'desktop' };
+const ACCESS_LABEL = {
+  free: ['Inclus', 'badge-ok'], included: ['Inclus Premium', 'badge-ok'], trial: ['Inclus pendant l’essai', 'badge-brand'],
+  licensed: ['Débloqué', 'badge-ok'], locked: ['Premium', ''],
+};
+const SECTION_LABELS = { about: 'À propos', services: 'Prestations & tarifs', team: 'Équipe', gallery: 'Galerie photos', reviews: 'Avis clients', infos: 'Horaires & accès' };
+
+async function renderSiteEditor() {
+  const d = await api(P('/site'));
+  siteState.data = d;
+  siteState.draft = {
+    template: d.site.template, published: !!d.site.published, content: d.site.content || {},
+    custom_css: d.site.custom_css || '', custom_domain: d.site.custom_domain || '',
+  };
+  view.innerHTML = `${head('Mon site', `
+      <span class="badge ${d.site.published ? 'badge-ok' : ''}" id="site-status">${d.site.published ? '● En ligne' : 'Hors ligne'}</span>
+      <a class="btn btn-ghost" href="${esc(d.url)}" target="_blank" rel="noopener">Voir mon site</a>
+      <button class="btn btn-brand" id="site-save">Enregistrer & publier</button>`)}
+    <div class="card" style="margin-bottom:16px;padding:14px 18px"><div class="row between">
+      <span class="small">Adresse de votre site : <a href="${esc(d.url)}" target="_blank" rel="noopener"><b>${esc(d.url)}</b></a>${d.site.custom_domain ? ` · domaine : <b>${esc(d.site.custom_domain)}</b>` : ''}</span>
+      <span class="small muted">Formule : <b>${d.plan === 'trial' ? 'Essai (tout inclus)' : d.plan === 'premium' ? 'Premium' : 'Essentiel'}</b></span></div></div>
+    <div class="site-editor">
+      <div>
+        <div class="tabs">${[['modele', 'Modèle'], ['contenu', 'Contenu'], ['style', 'Style & sections'], ['avance', 'Premium']].map(([k, l]) => `<button class="chip ${siteState.tab === k ? 'active' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>
+        <div id="site-panel"></div>
+      </div>
+      <div>
+        <div class="row between" style="margin-bottom:8px"><span class="small muted">Aperçu en direct (non publié tant que vous n’enregistrez pas)</span>
+          <div class="row" style="gap:4px"><button class="chip ${siteState.device === 'desktop' ? 'active' : ''}" data-device="desktop">Ordinateur</button><button class="chip ${siteState.device === 'mobile' ? 'active' : ''}" data-device="mobile">Mobile</button></div></div>
+        <div class="site-preview ${siteState.device}"><iframe id="site-frame" title="Aperçu du site"></iframe></div>
+      </div>
+    </div>`;
+  view.querySelectorAll('[data-tab]').forEach((b) => { b.onclick = () => { siteState.tab = b.dataset.tab; view.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('active', x === b)); renderSitePanel(); }; });
+  view.querySelectorAll('[data-device]').forEach((b) => {
+    b.onclick = () => {
+      siteState.device = b.dataset.device;
+      view.querySelectorAll('[data-device]').forEach((x) => x.classList.toggle('active', x === b));
+      $('.site-preview').classList.toggle('mobile', siteState.device === 'mobile');
+    };
+  });
+  $('#site-save').onclick = saveSite;
+  renderSitePanel();
+  refreshPreview();
+}
+
+let previewTimer;
+function refreshPreview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(async () => {
+    const res = await api(P('/site/preview'), { method: 'POST', body: siteState.draft, raw: true });
+    const frame = $('#site-frame');
+    if (frame) frame.srcdoc = await res.text();
+  }, 350);
+}
+
+function templateMeta(id) { return siteState.data.templates.find((t) => t.id === id); }
+
+async function saveSite() {
+  const t = templateMeta(siteState.draft.template);
+  if (t.access === 'locked') return unlockTemplate(t);
+  try {
+    await api(P('/site'), { method: 'PUT', body: siteState.draft });
+    toast('Site enregistré et publié.');
+    renderSiteEditor();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function unlockTemplate(t) {
+  const { pricing, currency } = siteState.data;
+  modal({
+    title: `Débloquer le modèle « ${t.name} »`,
+    body: `<p>${esc(t.description)}</p>
+      <div class="grid-2" style="gap:12px;margin-top:12px">
+        <div class="card"><b>Achat</b><div class="display" style="font-size:2rem">${pricing.once} ${currency}</div><p class="small muted" style="margin:0">Paiement unique, le modèle vous appartient définitivement.</p></div>
+        <div class="card"><b>Location</b><div class="display" style="font-size:2rem">${pricing.monthly} ${currency}<span class="small muted"> / mois</span></div><p class="small muted" style="margin:0">Sans engagement, résiliable à tout moment.</p></div>
+      </div>
+      <p class="small muted" style="margin-top:14px">Ou passez en <b>Premium (158 ${currency} / mois)</b> : tous les modèles, un site personnalisé par notre équipe et votre nom de domaine.</p>`,
+    actions: [
+      { id: 'close', label: 'Plus tard', cls: 'btn-ghost' },
+      { id: 'premium', label: 'Passer Premium', cls: 'btn-ghost', handler: async () => { await api(P('/plan'), { method: 'POST', body: { plan: 'premium' } }); toast('Formule Premium activée : tous les modèles sont inclus.'); setTimeout(saveSite, 50); } },
+      { id: 'monthly', label: `Louer ${pricing.monthly} ${currency}/mois`, cls: 'btn-ghost', handler: () => buyLicense(t.id, 'monthly') },
+      { id: 'once', label: `Acheter ${pricing.once} ${currency}`, cls: 'btn-brand', handler: () => buyLicense(t.id, 'once') },
+    ],
+  });
+}
+
+async function buyLicense(template, billing) {
+  await api(P('/site/licenses'), { method: 'POST', body: { template, billing } });
+  toast(billing === 'once' ? 'Modèle acheté.' : 'Modèle loué.');
+  const fresh = await api(P('/site'));
+  siteState.data.templates = fresh.templates;
+  siteState.data.licenses = fresh.licenses;
+  await api(P('/site'), { method: 'PUT', body: siteState.draft });
+  toast('Site enregistré et publié.');
+  renderSiteEditor();
+}
+
+function renderSitePanel() {
+  const { draft, data } = siteState;
+  const c = draft.content;
+  c.socials ||= {};
+  c.sections ||= {};
+  const panel = $('#site-panel');
+  const field = (key, label, { type = 'text', placeholder = '', hint = '' } = {}) => `<div class="field"><label>${label}</label>${type === 'textarea'
+    ? `<textarea data-c="${key}" placeholder="${esc(placeholder)}">${esc(c[key] || '')}</textarea>`
+    : `<input data-c="${key}" type="${type}" value="${esc(c[key] || '')}" placeholder="${esc(placeholder)}">`}${hint ? `<div class="hint">${hint}</div>` : ''}</div>`;
+
+  if (siteState.tab === 'modele') {
+    panel.innerHTML = `<div class="tpl-grid" style="grid-template-columns:1fr 1fr">${data.templates.map((t) => {
+      const [label, cls] = ACCESS_LABEL[t.access];
+      const priceTag = t.access === 'locked' ? `${data.pricing.once} ${data.currency} ou ${data.pricing.monthly}/mois` : label;
+      return `<button class="card tpl-card ${t.id === draft.template ? 'selected' : ''}" data-tpl="${t.id}" style="text-align:left;cursor:pointer;font:inherit;color:inherit">
+        <div class="tpl-thumb"><iframe src="/modeles/${t.id}" loading="lazy" tabindex="-1" title="${esc(t.name)}"></iframe></div>
+        <div class="tpl-body"><b>${esc(t.name)}</b><span class="badge ${cls}" style="margin-top:6px;align-self:flex-start">${esc(priceTag)}</span></div></button>`;
+    }).join('')}</div>
+    <p class="small muted" style="margin-top:12px">Cliquez pour prévisualiser n’importe quel modèle avec vos propres données. Les modèles premium se débloquent à l’enregistrement.</p>
+    ${data.licenses.length ? `<div class="card" style="margin-top:12px"><h4 style="margin-top:0">Mes modèles</h4>${data.licenses.map((l) => `<div class="list-item small"><div class="grow"><b>${esc(templateMeta(l.template)?.name || l.template)}</b> · ${l.billing === 'once' ? `acheté ${l.price_chf} ${data.currency}` : `loué ${l.price_chf} ${data.currency}/mois`}${l.active ? '' : ' · résilié'}</div>${l.active && l.billing === 'monthly' ? `<button class="btn btn-ghost btn-sm" data-cancel-lic="${l.id}">Résilier</button>` : ''}</div>`).join('')}</div>` : ''}`;
+    scaleThumbs(panel);
+    panel.querySelectorAll('[data-tpl]').forEach((b) => {
+      b.onclick = () => {
+        draft.template = b.dataset.tpl;
+        panel.querySelectorAll('[data-tpl]').forEach((x) => x.classList.toggle('selected', x === b));
+        refreshPreview();
+        const t = templateMeta(draft.template);
+        if (t.access === 'locked') toast(`Aperçu de « ${t.name} » — modèle premium à débloquer à l’enregistrement.`);
+      };
+    });
+    panel.querySelectorAll('[data-cancel-lic]').forEach((b) => {
+      b.onclick = async () => {
+        const ok = await modal({ title: 'Résilier la location ?', body: '<p>Votre site repassera sur le modèle Classique à la fin de la période.</p>', actions: [{ id: 'close', label: 'Garder', cls: 'btn-ghost' }, { id: 'ok', label: 'Résilier', cls: 'btn-danger' }] });
+        if (!ok) return;
+        await api(P(`/site/licenses/${b.dataset.cancelLic}`), { method: 'DELETE' });
+        toast('Location résiliée.');
+        renderSiteEditor();
+      };
+    });
+    return;
+  }
+
+  if (siteState.tab === 'contenu') {
+    panel.innerHTML = `<div class="card">
+      ${field('announcement', 'Bandeau d’annonce', { placeholder: 'Ex. : -15 % sur les soins en octobre' })}
+      ${field('tagline', 'Accroche courte', { placeholder: 'Coiffure · Genève' })}
+      ${field('hero_title', 'Grand titre', { placeholder: ctx.salon.name })}
+      ${field('hero_subtitle', 'Sous-titre', { type: 'textarea', placeholder: 'Une phrase qui donne envie de réserver.' })}
+      ${field('cta_label', 'Texte du bouton', { placeholder: 'Prendre rendez-vous' })}
+      ${field('hero_image', 'Photo principale (URL)', { placeholder: 'https://…', hint: 'Lien vers une photo (Instagram, Unsplash, votre hébergement…).' })}
+      <hr class="divider">
+      ${field('about_title', 'Titre « À propos »', { placeholder: 'Notre maison' })}
+      ${field('about_text', 'Texte « À propos »', { type: 'textarea', placeholder: 'Votre histoire, votre savoir-faire, vos produits…' })}
+      <div class="field"><label>Galerie photos (une URL par ligne)</label><textarea data-gallery placeholder="https://…">${esc((c.gallery || []).join('\n'))}</textarea></div>
+      <hr class="divider">
+      <div class="grid-2">${[['instagram', 'Instagram', '@votre.salon'], ['facebook', 'Facebook', 'votre.page'], ['tiktok', 'TikTok', '@votre.salon'], ['whatsapp', 'WhatsApp', '+41 79 …']].map(([k, l, ph]) => `<div class="field"><label>${l}</label><input data-social="${k}" value="${esc(c.socials[k] || '')}" placeholder="${ph}"></div>`).join('')}</div>
+    </div>`;
+  } else if (siteState.tab === 'style') {
+    panel.innerHTML = `<div class="card">
+      <div class="field"><label>Couleur principale</label><div class="row" style="flex-wrap:nowrap"><input type="color" data-c="accent" value="${esc(c.accent || templateMeta(draft.template).colors.accent || ctx.salon.accent)}" style="max-width:90px"><label class="check small" style="margin:0"><input type="checkbox" id="accent-default" ${c.accent ? '' : 'checked'}> Couleur du modèle</label></div></div>
+      <h4>Sections affichées</h4>
+      ${Object.entries(SECTION_LABELS).map(([k, l]) => `<label class="check"><input type="checkbox" data-section="${k}" ${c.sections[k] !== false ? 'checked' : ''}> ${l}</label>`).join('')}
+      <hr class="divider">
+      <label class="check"><input type="checkbox" id="site-published" ${draft.published ? 'checked' : ''}> Site en ligne</label>
+    </div>`;
+  } else {
+    const locked = !data.premium;
+    panel.innerHTML = `<div class="card" ${locked ? 'style="opacity:.75"' : ''}>
+      ${locked ? `<div class="card" style="background:var(--brand-soft);border:0;margin-bottom:14px"><b>Formule Premium — 158 ${data.currency} / mois</b><p class="small" style="margin:6px 0 10px">Site personnalisé par notre équipe, tous les modèles, votre domaine, CSS sur mesure et suppression de la mention Lumea.</p><button class="btn btn-brand btn-sm" id="go-premium">Passer Premium</button></div>` : ''}
+      <div class="field"><label>Nom de domaine personnalisé</label><input id="custom-domain" value="${esc(draft.custom_domain)}" placeholder="mon-salon.ch" ${locked ? 'disabled' : ''}>
+        <div class="hint">Chez votre registrar, créez un enregistrement <b>CNAME</b> de <code>www</code> vers <code>${esc(location.host)}</code>, puis saisissez votre domaine ici.</div></div>
+      <label class="check"><input type="checkbox" id="hide-branding" ${c.hide_branding ? 'checked' : ''} ${locked ? 'disabled' : ''}> Masquer « Réservation propulsée par Lumea »</label>
+      <div class="field" style="margin-top:12px"><label>CSS personnalisé</label><textarea id="custom-css" style="font-family:monospace;min-height:140px" placeholder=".hero h1 { letter-spacing: .02em; }" ${locked ? 'disabled' : ''}>${esc(draft.custom_css)}</textarea></div>
+      <hr class="divider">
+      <h4 style="margin-top:0">Site sur mesure par notre équipe</h4>
+      <p class="small muted">Décrivez votre univers (ambiance, couleurs, sites que vous aimez, photos disponibles). Un designer prépare votre site personnalisé.</p>
+      <textarea id="design-brief" placeholder="Ex. : ambiance minérale, beige et noir, photos de l’équipe, mise en avant des balayages…" ${locked ? 'disabled' : ''}></textarea>
+      <button class="btn btn-ghost" id="send-brief" style="margin-top:10px" ${locked ? 'disabled' : ''}>Envoyer ma demande</button>
+      ${data.design_requests.map((r) => `<div class="list-item small"><div class="grow">${esc(r.brief.slice(0, 120))}${r.admin_note ? `<div class="muted">Réponse : ${esc(r.admin_note)}</div>` : ''}</div><span class="badge ${r.status === 'livre' ? 'badge-ok' : r.status === 'en_cours' ? 'badge-brand' : ''}">${{ nouveau: 'Reçue', en_cours: 'En cours', livre: 'Livrée' }[r.status]}</span></div>`).join('')}
+    </div>`;
+    $('#go-premium')?.addEventListener('click', async () => { await api(P('/plan'), { method: 'POST', body: { plan: 'premium' } }); toast('Formule Premium activée.'); renderSiteEditor(); });
+    $('#send-brief')?.addEventListener('click', async () => {
+      try {
+        await api(P('/site/design-requests'), { method: 'POST', body: { brief: $('#design-brief').value } });
+        toast('Demande envoyée : notre équipe vous recontacte sous 48 h.');
+        renderSiteEditor();
+      } catch (err) { toast(err.message, 'error'); }
+    });
+  }
+
+  panel.oninput = (e) => {
+    const el = e.target;
+    if (el.dataset.c) {
+      c[el.dataset.c] = el.value;
+      if (el.dataset.c === 'accent') { const cb = $('#accent-default'); if (cb) cb.checked = false; }
+    } else if (el.dataset.social) c.socials[el.dataset.social] = el.value;
+    else if (el.hasAttribute('data-gallery')) c.gallery = el.value.split(/\s+/).filter(Boolean);
+    else if (el.dataset.section) c.sections[el.dataset.section] = el.checked;
+    else if (el.id === 'accent-default') { if (el.checked) c.accent = ''; else c.accent = $('[data-c="accent"]').value; }
+    else if (el.id === 'site-published') draft.published = el.checked;
+    else if (el.id === 'custom-domain') draft.custom_domain = el.value;
+    else if (el.id === 'custom-css') draft.custom_css = el.value;
+    else if (el.id === 'hide-branding') c.hide_branding = el.checked;
+    else return;
+    refreshPreview();
+  };
+  panel.onchange = panel.oninput;
+}
+
 // =====================================================================
 // Router
 // =====================================================================
 const ROUTES = {
   dashboard: renderDashboard, agenda: renderAgenda, clients: () => renderClients(), services: renderServices,
-  team: renderTeam, reviews: renderReviews, automations: renderAutomations, settings: renderSettings, billing: renderBilling,
+  team: renderTeam, reviews: renderReviews, automations: renderAutomations, settings: renderSettings, billing: renderBilling, site: renderSiteEditor,
 };
 
 async function route() {

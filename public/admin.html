@@ -13,33 +13,48 @@
 <body>
   <header id="site-header"></header>
   <main class="container" style="padding-top:32px" id="page"></main>
+  <script src="/js/config.js"></script>
   <script src="/js/common.js"></script>
   <script>
     'use strict';
-    const PLAN_LABEL = { trial: 'Essai', starter: 'Solo', pro: 'Pro', business: 'Business' };
+    const PLAN_LABEL = { trial: 'Essai', essentiel: 'Essentiel', premium: 'Premium' };
+    const REQ_LABEL = { nouveau: 'Nouvelle', en_cours: 'En cours', livre: 'Livrée' };
     async function load() {
       const d = await api('/api/admin/overview');
       const k = d.kpis;
+      const cur = d.currency;
+      const n = (v) => Number(v).toLocaleString('fr-CH');
       $('#page').innerHTML = `
         <div class="page-head"><h1>Pilotage de la plateforme</h1><div class="grow"></div><button class="btn btn-ghost btn-sm" id="logout">Se déconnecter</button></div>
         <div class="kpis">
-          <div class="kpi"><div class="label">MRR</div><div class="value">${k.mrr_eur.toLocaleString('fr-FR')} €</div><div class="sub">ARR ${(k.mrr_eur * 12).toLocaleString('fr-FR')} €</div></div>
-          <div class="kpi"><div class="label">Salons</div><div class="value">${k.salons}</div><div class="sub">${k.paying} payants · ${k.trials} en essai</div></div>
-          <div class="kpi"><div class="label">Conversion essai → payant</div><div class="value">${k.salons ? Math.round((k.paying / k.salons) * 100) : 0} %</div></div>
-          <div class="kpi"><div class="label">Réservations (30 j)</div><div class="value">${k.bookings_30d.toLocaleString('fr-FR')}</div></div>
+          <div class="kpi"><div class="label">Revenu mensuel récurrent</div><div class="value">${n(k.mrr)} ${cur}</div><div class="sub">Abonnements ${n(k.mrr_plans)} · modèles ${n(k.mrr_templates)}</div></div>
+          <div class="kpi"><div class="label">Revenu annuel projeté</div><div class="value">${n(k.mrr * 12)} ${cur}</div></div>
+          <div class="kpi"><div class="label">Modèles vendus (unique)</div><div class="value">${n(k.templates_once_total)} ${cur}</div><div class="sub">${k.licenses_active} licence(s) active(s)</div></div>
+          <div class="kpi"><div class="label">Salons</div><div class="value">${k.salons}</div><div class="sub">${k.premium} Premium · ${k.essentiel} Essentiel · ${k.trials} essai</div></div>
+          <div class="kpi"><div class="label">Réservations (30 j)</div><div class="value">${n(k.bookings_30d)}</div></div>
           <div class="kpi"><div class="label">Comptes clients</div><div class="value">${k.users}</div></div>
         </div>
+        <div class="card" style="margin-bottom:18px"><h3>Demandes de sites sur mesure (Premium)</h3>
+          ${d.design_requests.map((r) => `<div class="list-item"><div class="grow"><b>${esc(r.salon_name)}</b> <span class="small muted">· ${esc(r.owner_email)} · ${esc(r.created_at.slice(0, 10))}</span>
+              <div class="small">${esc(r.brief)}</div>
+              <input class="small" data-note="${r.id}" value="${esc(r.admin_note)}" placeholder="Note pour le salon (visible dans son espace)" style="margin-top:6px;padding:6px 10px"></div>
+            <select data-req="${r.id}" style="width:auto;padding:6px 8px">${Object.entries(REQ_LABEL).map(([v, l]) => `<option value="${v}" ${v === r.status ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`).join('') || '<p class="muted small">Aucune demande pour le moment.</p>'}
+        </div>
         <div class="table-wrap"><table>
-          <thead><tr><th>Salon</th><th>Ville</th><th>Propriétaire</th><th>Équipe</th><th>RDV</th><th>Formule</th><th>Visible</th><th></th></tr></thead>
+          <thead><tr><th>Salon</th><th>Propriétaire</th><th>Site</th><th>RDV</th><th>Formule</th><th>Visible</th><th></th></tr></thead>
           <tbody>${d.salons.map((s) => `
-            <tr><td><b>${esc(s.name)}</b><div class="small muted">${esc(CATEGORY_LABELS[s.category] || s.category)} · créé le ${esc(s.created_at.slice(0, 10))}</div></td>
-              <td>${esc(s.city)}</td><td class="small">${esc(s.owner_email)}</td><td>${s.staff}</td><td>${s.bookings}</td>
+            <tr><td><b>${esc(s.name)}</b><div class="small muted">${esc(CATEGORY_LABELS[s.category] || s.category)} · ${esc(s.city)}</div></td>
+              <td class="small">${esc(s.owner_email)}</td>
+              <td class="small"><a href="/s/${encodeURIComponent(s.slug)}" target="_blank">${esc(s.template || 'classique')}</a>${s.licenses ? ` <span class="badge">${s.licenses} licence</span>` : ''}${s.custom_domain ? `<div class="muted">${esc(s.custom_domain)}</div>` : ''}</td>
+              <td>${n(s.bookings)}</td>
               <td><select data-plan="${s.id}" style="width:auto;padding:6px 8px">${Object.entries(PLAN_LABEL).map(([v, l]) => `<option value="${v}" ${v === s.plan ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
               <td><input type="checkbox" data-pub="${s.id}" ${s.published ? 'checked' : ''} aria-label="Visible"></td>
-              <td style="white-space:nowrap"><a class="btn btn-ghost btn-sm" href="/salon.html?s=${encodeURIComponent(s.slug)}" target="_blank">Page</a> <a class="btn btn-ghost btn-sm" href="/app?salon=${s.id}">Back-office</a></td></tr>`).join('')}
+              <td style="white-space:nowrap"><a class="btn btn-ghost btn-sm" href="/s/${encodeURIComponent(s.slug)}" target="_blank">Site</a> <a class="btn btn-ghost btn-sm" href="/app?salon=${s.id}">Back-office</a></td></tr>`).join('')}
           </tbody></table></div>`;
       $$('[data-plan]').forEach((el) => { el.onchange = () => api(`/api/admin/salons/${el.dataset.plan}`, { method: 'PATCH', body: { plan: el.value } }).then(() => { toast('Formule mise à jour.'); load(); }); });
       $$('[data-pub]').forEach((el) => { el.onchange = () => api(`/api/admin/salons/${el.dataset.pub}`, { method: 'PATCH', body: { published: el.checked } }).then(() => toast('Visibilité mise à jour.')); });
+      $$('[data-req]').forEach((el) => { el.onchange = () => api(`/api/admin/design-requests/${el.dataset.req}`, { method: 'PATCH', body: { status: el.value } }).then(() => toast('Statut mis à jour.')); });
+      $$('[data-note]').forEach((el) => { el.onchange = () => api(`/api/admin/design-requests/${el.dataset.note}`, { method: 'PATCH', body: { admin_note: el.value } }).then(() => toast('Note enregistrée.')); });
       $('#logout').onclick = async () => { await api('/api/auth/logout', { method: 'POST', body: {} }); location.href = '/'; };
     }
     mountChrome().then((u) => (u?.role === 'admin' ? load() : (location.href = '/connexion?next=/admin')));

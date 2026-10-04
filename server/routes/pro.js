@@ -7,7 +7,9 @@ const { getSlots } = require('../availability');
 const { createBooking, rescheduleBooking, setStatus, HttpError, clean } = require('../bookings');
 const { CATEGORIES } = require('../salons');
 const { runAutomations, APP_URL } = require('../notifications');
-const { PLANS } = require('../plans');
+const { PLANS, TEMPLATE_PRICING, CURRENCY } = require('../plans');
+const sites = require('../sites');
+const { TEMPLATES, SECTION_KEYS } = require('../templates');
 
 const router = express.Router();
 router.use(requireRole('pro', 'admin'));
@@ -61,6 +63,7 @@ router.get('/salon', (req, res) => {
     plans: PLANS,
     links: {
       page: `${APP_URL}/salon.html?s=${s.slug}`,
+      site: `${APP_URL}/s/${s.slug}`,
       widget: `<iframe src="${APP_URL}/salon.html?s=${s.slug}&embed=1" style="width:100%;min-height:720px;border:0;border-radius:16px" loading="lazy" title="Réserver chez ${s.name.replace(/"/g, '&quot;')}"></iframe>`,
       ical: `${APP_URL}/api/ical/${s.ical_token}.ics`,
     },
@@ -410,6 +413,114 @@ router.get('/waitlist', (req, res) => {
     `SELECT w.*, sv.name AS service_name FROM waitlist w JOIN services sv ON sv.id = w.service_id
      WHERE w.salon_id = ? AND w.date >= ? ORDER BY w.date, w.created_at`, req.salon.id, T.now().date,
   ));
+});
+
+
+// ---------- Website (each salon has its own site) ----------
+
+const siteUrl = (salon) => `${APP_URL}/s/${salon.slug}`;
+const httpUrl = (v) => (/^https?:\/\/[^\s'"()<>\\]+$/.test(String(v || '').trim()) ? String(v).trim().slice(0, 500) : '');
+
+function sanitizeContent(raw = {}) {
+  const str = (v, max) => clean(v, max);
+  return {
+    announcement: str(raw.announcement, 160),
+    tagline: str(raw.tagline, 80),
+    hero_title: str(raw.hero_title, 100),
+    hero_subtitle: str(raw.hero_subtitle, 300),
+    hero_image: httpUrl(raw.hero_image),
+    cta_label: str(raw.cta_label, 40),
+    about_title: str(raw.about_title, 80),
+    about_text: str(raw.about_text, 2000),
+    gallery: (Array.isArray(raw.gallery) ? raw.gallery : String(raw.gallery || '').split(/\s+/)).map(httpUrl).filter(Boolean).slice(0, 12),
+    accent: /^#[0-9a-f]{6}$/i.test(raw.accent || '') ? raw.accent : '',
+    socials: Object.fromEntries(['instagram', 'facebook', 'tiktok', 'whatsapp'].map((k) => [k, str(raw.socials?.[k], 120)])),
+    sections: Object.fromEntries(SECTION_KEYS.map((k) => [k, raw.sections?.[k] !== false])),
+    hide_branding: !!raw.hide_branding,
+  };
+}
+
+router.get('/site', (req, res) => {
+  const site = sites.ensureSite(req.salon.id);
+  res.json({
+    site: { ...site, content: sites.parseContent(site) },
+    templates: sites.templateCatalog(req.salon),
+    pricing: TEMPLATE_PRICING,
+    currency: CURRENCY,
+    plan: req.salon.plan,
+    premium: sites.hasPremiumFeatures(req.salon),
+    url: siteUrl(req.salon),
+    licenses: all('SELECT * FROM template_licenses WHERE salon_id = ? ORDER BY created_at DESC', req.salon.id),
+    design_requests: all('SELECT * FROM design_requests WHERE salon_id = ? ORDER BY created_at DESC', req.salon.id),
+  });
+});
+
+router.put('/site', (req, res) => {
+  const b = req.body || {};
+  const site = sites.ensureSite(req.salon.id);
+  const template = b.template ?? site.template;
+  if (!TEMPLATES.some((t) => t.id === template)) throw new HttpError(400, 'Modèle inconnu.');
+  if (!sites.canUseTemplate(req.salon, template)) {
+    throw new HttpError(402, `Ce modèle est premium : ${TEMPLATE_PRICING.once} ${CURRENCY} une fois ou ${TEMPLATE_PRICING.monthly} ${CURRENCY} / mois, ou inclus dans la formule Premium.`);
+  }
+  const premium = sites.hasPremiumFeatures(req.salon);
+  let domain = site.custom_domain;
+  if (b.custom_domain !== undefined) {
+    const d = clean(b.custom_domain, 120).toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+    if (d && !premium) throw new HttpError(402, 'Le nom de domaine personnalisé est inclus dans la formule Premium.');
+    if (d && !/^([a-z0-9-]+\.)+[a-z]{2,}$/.test(d)) throw new HttpError(400, 'Nom de domaine invalide (ex. : mon-salon.ch).');
+    if (d && one('SELECT salon_id FROM sites WHERE custom_domain = ? AND salon_id != ?', d, req.salon.id)) throw new HttpError(409, 'Ce domaine est déjà utilisé.');
+    domain = d || null;
+  }
+  const css = b.custom_css !== undefined ? String(b.custom_css).slice(0, 20000) : site.custom_css;
+  if (b.custom_css && !premium) throw new HttpError(402, 'Le CSS personnalisé est inclus dans la formule Premium.');
+  run(
+    `UPDATE sites SET template = ?, content = ?, published = ?, custom_css = ?, custom_domain = ?, updated_at = datetime('now') WHERE salon_id = ?`,
+    template,
+    JSON.stringify(b.content !== undefined ? sanitizeContent(b.content) : sites.parseContent(site)),
+    b.published === undefined ? site.published : (b.published ? 1 : 0),
+    css, domain, req.salon.id,
+  );
+  res.json({ ok: true, url: siteUrl(req.salon) });
+});
+
+/** Live preview of unsaved edits (any template can be previewed, even locked ones). */
+router.post('/site/preview', (req, res) => {
+  const b = req.body || {};
+  const template = TEMPLATES.some((t) => t.id === b.template) ? b.template : undefined;
+  res.type('html').send(sites.renderSalonSite(req.salon, {
+    templateId: template, content: b.content ? sanitizeContent(b.content) : undefined,
+    customCss: b.custom_css !== undefined ? String(b.custom_css).slice(0, 20000) : undefined, preview: true,
+  }));
+});
+
+router.post('/site/licenses', (req, res) => {
+  const { template, billing } = req.body || {};
+  const tpl = TEMPLATES.find((t) => t.id === template);
+  if (!tpl || tpl.free) throw new HttpError(400, 'Modèle invalide.');
+  if (!['once', 'monthly'].includes(billing)) throw new HttpError(400, 'Mode de paiement invalide.');
+  if (sites.isPremium(req.salon)) throw new HttpError(400, 'Tous les modèles sont déjà inclus dans votre formule Premium.');
+  if (sites.activeLicenses(req.salon.id).some((l) => l.template === template)) throw new HttpError(409, 'Vous disposez déjà de ce modèle.');
+  // Payment integration point (Stripe Checkout: one-off payment or subscription item) — see README.
+  run('INSERT INTO template_licenses (salon_id, template, billing, price_chf) VALUES (?,?,?,?)',
+    req.salon.id, template, billing, TEMPLATE_PRICING[billing]);
+  res.status(201).json({ ok: true });
+});
+
+router.delete('/site/licenses/:id', (req, res) => {
+  const l = one('SELECT * FROM template_licenses WHERE id = ? AND salon_id = ? AND active = 1', Number(req.params.id), req.salon.id);
+  if (!l) throw new HttpError(404, 'Licence introuvable.');
+  if (l.billing !== 'monthly') throw new HttpError(400, 'Un modèle acheté vous appartient définitivement.');
+  run("UPDATE template_licenses SET active = 0, cancelled_at = datetime('now') WHERE id = ?", l.id);
+  res.json({ ok: true });
+});
+
+router.post('/site/design-requests', (req, res) => {
+  if (!sites.hasPremiumFeatures(req.salon)) throw new HttpError(402, 'Le site sur mesure est inclus dans la formule Premium.');
+  const brief = clean(req.body?.brief, 4000);
+  if (brief.length < 20) throw new HttpError(400, 'Décrivez votre projet en quelques phrases (20 caractères minimum).');
+  run('INSERT INTO design_requests (salon_id, brief) VALUES (?,?)', req.salon.id, brief);
+  res.status(201).json({ ok: true });
 });
 
 module.exports = router;

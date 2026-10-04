@@ -9,6 +9,35 @@ if (DB_PATH !== ':memory:') fs.mkdirSync(path.dirname(DB_PATH), { recursive: tru
 const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
 
+// Migration v1 -> v2: plans starter/pro/business became essentiel/premium (CHECK constraint must be rebuilt).
+{
+  const legacy = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'salons'").get();
+  if (legacy && legacy.sql.includes("'starter'")) {
+    const cols = db.prepare('PRAGMA table_info(salons)').all().map((c) => c.name);
+    const select = cols.map((c) => (c === 'plan'
+      ? "CASE WHEN plan = 'business' THEN 'premium' WHEN plan IN ('starter','pro') THEN 'essentiel' ELSE plan END"
+      : `"${c}"`)).join(', ');
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec('BEGIN');
+    try {
+      // Build-copy-swap (renaming the old table first would rewrite other tables' foreign keys).
+      db.exec(legacy.sql
+        .replace(/CREATE TABLE (IF NOT EXISTS )?"?salons"?/, 'CREATE TABLE salons_v2')
+        .replace("'trial','starter','pro','business'", "'trial','essentiel','premium'"));
+      db.exec(`INSERT INTO salons_v2 (${cols.map((c) => `"${c}"`).join(', ')}) SELECT ${select} FROM salons`);
+      db.exec('DROP TABLE salons');
+      db.exec('ALTER TABLE salons_v2 RENAME TO salons');
+      if (db.prepare('PRAGMA foreign_key_check').all().length) throw new Error('Migration v2 : contrôle des clés étrangères échoué.');
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    } finally {
+      db.exec('PRAGMA foreign_keys = ON');
+    }
+  }
+}
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY,
@@ -35,7 +64,7 @@ CREATE TABLE IF NOT EXISTS salons (
   email TEXT NOT NULL DEFAULT '',
   cover_url TEXT NOT NULL DEFAULT '',
   accent TEXT NOT NULL DEFAULT '#7c3aed',
-  plan TEXT NOT NULL DEFAULT 'trial' CHECK (plan IN ('trial','starter','pro','business')),
+  plan TEXT NOT NULL DEFAULT 'trial' CHECK (plan IN ('trial','essentiel','premium')),
   trial_ends_at TEXT,
   deposit_percent INTEGER NOT NULL DEFAULT 0,
   cancel_hours INTEGER NOT NULL DEFAULT 24,
@@ -169,6 +198,41 @@ CREATE TABLE IF NOT EXISTS notifications (
   subject TEXT NOT NULL,
   body TEXT NOT NULL,
   delivered INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`);
+
+db.exec(`
+-- Each salon owns one public website, rendered at /s/<slug> (or on its own domain for Premium).
+CREATE TABLE IF NOT EXISTS sites (
+  salon_id INTEGER PRIMARY KEY REFERENCES salons(id) ON DELETE CASCADE,
+  template TEXT NOT NULL DEFAULT 'classique',
+  published INTEGER NOT NULL DEFAULT 1,
+  content TEXT NOT NULL DEFAULT '{}',
+  custom_css TEXT NOT NULL DEFAULT '',
+  custom_domain TEXT UNIQUE,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Premium templates unlocked by a salon: one-off purchase or monthly rental.
+CREATE TABLE IF NOT EXISTS template_licenses (
+  id INTEGER PRIMARY KEY,
+  salon_id INTEGER NOT NULL REFERENCES salons(id) ON DELETE CASCADE,
+  template TEXT NOT NULL,
+  billing TEXT NOT NULL CHECK (billing IN ('once','monthly')),
+  price_chf INTEGER NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  cancelled_at TEXT
+);
+
+-- Premium plan: tailor-made design requests handled by the platform team.
+CREATE TABLE IF NOT EXISTS design_requests (
+  id INTEGER PRIMARY KEY,
+  salon_id INTEGER NOT NULL REFERENCES salons(id) ON DELETE CASCADE,
+  brief TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'nouveau' CHECK (status IN ('nouveau','en_cours','livre')),
+  admin_note TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);

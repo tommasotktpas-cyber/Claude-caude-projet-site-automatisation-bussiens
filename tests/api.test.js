@@ -162,14 +162,68 @@ test('pro can book walk-ins without e-mail and force a time', async () => {
   assert.equal(one("SELECT COUNT(*) AS n FROM notifications WHERE recipient LIKE '%.invalid'").n, 0, 'placeholder e-mails never notified');
 });
 
-test('pro signup creates a bookable salon; plan limits staff', async () => {
-  const r = await req('/api/auth/register-pro', { method: 'POST', body: { email: 'new@test.lu', password: 'password123', name: 'Nina', salon_name: 'Chez Nina', city: 'Esch', category: 'ongles' } });
+test('pro signup creates a bookable salon with its own website', async () => {
+  const r = await req('/api/auth/register-pro', { method: 'POST', body: { email: 'new@test.lu', password: 'password123', name: 'Nina', salon_name: 'Chez Nina', city: 'Fribourg', category: 'ongles' } });
   assert.equal(r.status, 201);
   const me = await req('/api/auth/me', { cookie: r.cookie });
   assert.equal(me.body.salon.name, 'Chez Nina');
-  await req('/api/pro/plan', { method: 'POST', cookie: r.cookie, body: { plan: 'starter' } });
-  const extra = await req('/api/pro/staff', { method: 'POST', cookie: r.cookie, body: { name: 'Second' } });
-  assert.equal(extra.status, 402);
+  const site = await req(`/s/${me.body.salon.slug}`);
+  assert.equal(site.status, 200);
+  assert.match(site.body, /Chez Nina/);
+  assert.match(site.body, /application\/ld\+json/);
+});
+
+test('website templates: Essentiel must unlock premium templates, Premium gets everything', async () => {
+  const salon = makeSalon('web@test.lu', 'Salon Web');
+  run("UPDATE salons SET plan = 'essentiel' WHERE id = ?", salon.id);
+  const login = await req('/api/auth/login', { method: 'POST', body: { email: 'web@test.lu', password: 'password123' } });
+  const cookie = login.cookie;
+
+  const locked = await req('/api/pro/site', { method: 'PUT', cookie, body: { template: 'elegance' } });
+  assert.equal(locked.status, 402);
+  const css = await req('/api/pro/site', { method: 'PUT', cookie, body: { custom_css: 'body{color:red}' } });
+  assert.equal(css.status, 402, 'custom CSS is Premium-only');
+
+  const preview = await req('/api/pro/site/preview', { method: 'POST', cookie, body: { template: 'elegance', content: { hero_title: 'Titre test' } } });
+  assert.match(preview.body, /Cormorant/, 'locked templates can still be previewed');
+  assert.match(preview.body, /Titre test/);
+
+  assert.equal((await req('/api/pro/site/licenses', { method: 'POST', cookie, body: { template: 'elegance', billing: 'monthly' } })).status, 201);
+  const ok = await req('/api/pro/site', { method: 'PUT', cookie, body: { template: 'elegance', content: { hero_title: 'Bienvenue <b>chez nous</b>', gallery: ['javascript:alert(1)', 'https://img.test/a.jpg'] } } });
+  assert.equal(ok.status, 200);
+  let page = (await req(`/s/${salon.slug}`)).body;
+  assert.match(page, /Cormorant/);
+  assert.match(page, /Bienvenue &lt;b&gt;chez nous&lt;\/b&gt;/, 'content is escaped');
+  assert.doesNotMatch(page, /javascript:alert/);
+  assert.match(page, /propulsée par Lumea/);
+
+  const site = (await req('/api/pro/site', { cookie })).body;
+  const lic = site.licenses[0];
+  assert.equal((await req(`/api/pro/site/licenses/${lic.id}`, { method: 'DELETE', cookie })).status, 200);
+  page = (await req(`/s/${salon.slug}`)).body;
+  assert.doesNotMatch(page, /Cormorant/, 'falls back to Classique when the rental ends');
+
+  run("UPDATE salons SET plan = 'premium' WHERE id = ?", salon.id);
+  const prem = await req('/api/pro/site', { method: 'PUT', cookie, body: { template: 'neon', custom_css: '.x{color:red}', custom_domain: 'www.salon-web.ch', content: { hide_branding: true } } });
+  assert.equal(prem.status, 200);
+  const byDomain = await fetch(`${base}/`, { headers: { 'X-Forwarded-Host': 'salon-web.ch' } }).then((x) => x.text());
+  assert.match(byDomain, /Space Grotesk/, 'custom domain serves the salon site');
+  assert.match(byDomain, /\.x\{color:red\}/);
+  assert.doesNotMatch(byDomain, /propulsée par Lumea/);
+});
+
+test('premium design requests reach the platform admin', async () => {
+  const salon = makeSalon('design@test.lu', 'Salon Design');
+  run("UPDATE salons SET plan = 'premium' WHERE id = ?", salon.id);
+  const login = await req('/api/auth/login', { method: 'POST', body: { email: 'design@test.lu', password: 'password123' } });
+  const r = await req('/api/pro/site/design-requests', { method: 'POST', cookie: login.cookie, body: { brief: 'Ambiance minérale, beige et noir, photos de l’équipe.' } });
+  assert.equal(r.status, 201);
+  run("INSERT INTO users (email, password_hash, name, role) VALUES ('root@test.lu', ?, 'Root', 'admin')", hashPassword('password123'));
+  const admin = await req('/api/auth/login', { method: 'POST', body: { email: 'root@test.lu', password: 'password123' } });
+  const ov = await req('/api/admin/overview', { cookie: admin.cookie });
+  assert.equal(ov.status, 200);
+  assert.ok(ov.body.design_requests.some((d) => d.salon_name === 'Salon Design'));
+  assert.ok(ov.body.kpis.mrr >= 158);
 });
 
 test('automations send 24h reminders once', async () => {
