@@ -14,7 +14,7 @@ router.get('/overview', (_req, res) => {
     `SELECT s.id, s.name, s.slug, s.city, s.category, s.plan, s.trial_ends_at, s.published, s.created_at, u.email AS owner_email,
             (SELECT COUNT(*) FROM bookings b WHERE b.salon_id = s.id) AS bookings,
             (SELECT COUNT(*) FROM staff st WHERE st.salon_id = s.id AND st.active = 1) AS staff,
-            x.template, x.published AS site_published, x.custom_domain,
+            x.template, x.published AS site_published, x.custom_domain, s.boost_until,
             (SELECT COUNT(*) FROM template_licenses l WHERE l.salon_id = s.id AND l.active = 1) AS licenses
      FROM salons s LEFT JOIN sites x ON x.salon_id = s.id JOIN users u ON u.id = s.owner_id ORDER BY s.created_at DESC`,
   );
@@ -23,7 +23,10 @@ router.get('/overview', (_req, res) => {
   const lic = one(`SELECT COALESCE(SUM(price_chf) FILTER (WHERE billing = 'monthly' AND active = 1), 0) AS monthly,
                           COALESCE(SUM(price_chf) FILTER (WHERE billing = 'once'), 0) AS once,
                           COUNT(*) FILTER (WHERE active = 1) AS active FROM template_licenses`);
-  const plansMrr = paying.reduce((sum, s) => sum + price[s.plan], 0);
+  const { BOOST_PRICE, PLATFORM_FEE_PERCENT } = require('../plans');
+  const boosts = one("SELECT COUNT(*) AS n FROM salons WHERE boost_until >= ?", T.now().date).n;
+  const plansMrr = paying.reduce((sum, s) => sum + price[s.plan], 0) + boosts * BOOST_PRICE;
+  const customSites = one('SELECT COALESCE(SUM(paid_chf), 0) AS total, COUNT(*) FILTER (WHERE paid_chf > 0) AS n FROM design_requests');
   res.json({
     salons,
     kpis: {
@@ -35,6 +38,10 @@ router.get('/overview', (_req, res) => {
       mrr_templates: lic.monthly,
       templates_once_total: lic.once,
       licenses_active: lic.active,
+      boosts,
+      custom_sites_total: customSites.total,
+      custom_sites: customSites.n,
+      platform_fee_percent: PLATFORM_FEE_PERCENT,
       premium: salons.filter((s) => s.plan === 'premium').length,
       essentiel: salons.filter((s) => s.plan === 'essentiel').length,
       bookings_30d: one('SELECT COUNT(*) AS n FROM bookings WHERE created_at >= ?', `${T.addDays(T.now().date, -30)} 00:00:00`).n,

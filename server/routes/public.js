@@ -37,7 +37,8 @@ function salonBySlug(slug) {
 
 function publicSalon(s) {
   const {
-    ical_token, owner_id, trial_ends_at, plan, stripe_customer_id, stripe_subscription_id, stripe_account_id, stripe_charges_enabled, ...rest
+    ical_token, owner_id, trial_ends_at, plan, stripe_customer_id, stripe_subscription_id, stripe_account_id, stripe_charges_enabled,
+    boost_until, boost_subscription_id, ...rest
   } = s;
   // Deposits are only announced when they can actually be collected.
   if (billing.depositMode(s) === 'off') rest.deposit_percent = 0;
@@ -86,6 +87,9 @@ router.get('/salons', (req, res) => {
     name: (a, b) => a.name.localeCompare(b.name),
   };
   rows.sort(sorters[sort] || sorters.rating);
+  // Sponsored salons ("mise en avant") come first, clearly labelled.
+  const today = now.date;
+  rows.sort((a, b) => Number(b.boost_until >= today) - Number(a.boost_until >= today));
   const services = all("SELECT salon_id, name FROM services WHERE active = 1 ORDER BY position, id");
   // "Available today at 14:30" on each card: first free slot today or tomorrow for the salon's first service.
   const { getSlots } = require('../availability');
@@ -102,6 +106,7 @@ router.get('/salons', (req, res) => {
     ...publicSalon(r),
     top_services: services.filter((s) => s.salon_id === r.id).slice(0, 3).map((s) => s.name),
     next_slot: nextSlot(r.id),
+    sponsored: !!r.boost_until && r.boost_until >= today,
   })));
 });
 
@@ -203,6 +208,7 @@ router.post('/salons/:slug/gift-cards', rateLimit('gift', 10, 10 * 60 * 1000), a
     mode: 'payment', customer_email: card.buyer_email,
     line_items: [{ quantity: 1, price_data: { currency: (process.env.CURRENCY || 'CHF').toLowerCase(), unit_amount: card.initial_cents, product_data: { name: `Carte cadeau ${salon.name}` } } }],
     metadata: { kind: 'gift_card', gift_card_id: String(card.id), salon_id: String(salon.id) },
+    ...(require('../plans').platformFee(card.initial_cents) ? { payment_intent_data: { application_fee_amount: require('../plans').platformFee(card.initial_cents) } } : {}),
     success_url: `${APP_URL}/carte-cadeau.html?c=${card.code}`, cancel_url: `${APP_URL}/carte-cadeau.html?s=${salon.slug}`,
   }, { account: salon.stripe_account_id });
   run('UPDATE gift_cards SET stripe_session_id = ? WHERE id = ?', session.id, card.id);

@@ -839,8 +839,24 @@ async function renderBilling() {
         <ul>${p.features.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>
         <button class="btn ${p.id === s.plan ? 'btn-ghost' : 'btn-brand'} btn-block" data-plan="${p.id}" ${p.id === s.plan ? 'disabled' : ''}>${p.id === s.plan ? 'Formule active' : 'Choisir'}</button>
       </div>`).join('')}</div>
+    <div class="card" style="margin-top:18px"><div class="row between">
+      <div><h3 style="margin:0">Mise en avant sur Lumea</h3><p class="small muted" style="margin:4px 0 0">Votre salon apparaît en premier dans les recherches de votre ville, avec le badge « Sponsorisé ». Aucune publicité n’est jamais affichée sur votre propre page ni sur votre site.</p></div>
+      ${s.boost_until && s.boost_until >= ctx.today
+        ? `<div class="stack" style="text-align:right"><span class="badge badge-ok">Active jusqu’au ${fmt.date(s.boost_until, { day: 'numeric', month: 'long' })}</span><button class="btn btn-ghost btn-sm" id="boost-stop">Arrêter</button></div>`
+        : `<button class="btn btn-brand" id="boost-start">Mettre en avant — ${window.LUMEA_CONFIG?.boost_price || 29} ${CURRENCY} / mois</button>`}
+    </div></div>
     ${s.stripe_customer_id ? '<button class="btn btn-ghost" id="billing-portal" style="margin-top:14px">Factures, carte bancaire et résiliation</button>' : ''}
     <p class="small muted" style="margin-top:14px">Facturation mensuelle, résiliable à tout moment. Modèles de site premium : gérés dans <a href="#site">Mon site</a>. Le paiement par carte (Stripe) s’active en production — voir README.</p>`;
+  $('#boost-start')?.addEventListener('click', async () => {
+    try {
+      const r = await api(P('/boost'), { method: 'POST', body: {} });
+      if (r.checkout_url) { location.href = r.checkout_url; return; }
+      toast('Votre salon est mis en avant pour 31 jours.'); renderBilling();
+    } catch (err) { toast(err.message, 'error'); }
+  });
+  $('#boost-stop')?.addEventListener('click', async () => {
+    await api(P('/boost'), { method: 'DELETE' }); toast('Mise en avant arrêtée.'); renderBilling();
+  });
   $('#billing-portal')?.addEventListener('click', async () => {
     try { location.href = (await api(P('/billing/portal'), { method: 'POST', body: {} })).url; } catch (err) { toast(err.message, 'error'); }
   });
@@ -1035,12 +1051,23 @@ function renderSitePanel() {
       <label class="check"><input type="checkbox" id="hide-branding" ${c.hide_branding ? 'checked' : ''} ${locked ? 'disabled' : ''}> Masquer « Réservation propulsée par Lumea »</label>
       <div class="field" style="margin-top:12px"><label>CSS personnalisé</label><textarea id="custom-css" style="font-family:monospace;min-height:140px" placeholder=".hero h1 { letter-spacing: .02em; }" ${locked ? 'disabled' : ''}>${esc(draft.custom_css)}</textarea></div>
       <hr class="divider">
+      ${locked ? `<div class="card" style="background:var(--surface-2);border:0;margin-bottom:14px"><b>On crée votre site pour vous — ${data.custom_site_price} ${data.currency}, une seule fois</b>
+        <p class="small" style="margin:6px 0 10px">Un designer réalise votre site à partir de vos photos, de vos couleurs et de vos envies. Il vous appartient ensuite, sans abonnement supplémentaire.</p>
+        <textarea id="custom-brief" placeholder="Votre univers, vos couleurs, les sites que vous aimez, les photos que vous avez…"></textarea>
+        <button class="btn btn-brand btn-sm" id="buy-custom" style="margin-top:8px">Commander mon site (${data.custom_site_price} ${data.currency})</button></div>` : ''}
       <h4 style="margin-top:0">Site sur mesure par notre équipe</h4>
       <p class="small muted">Décrivez votre univers (ambiance, couleurs, sites que vous aimez, photos disponibles). Un designer prépare votre site personnalisé.</p>
       <textarea id="design-brief" placeholder="Ex. : ambiance minérale, beige et noir, photos de l’équipe, mise en avant des balayages…" ${locked ? 'disabled' : ''}></textarea>
       <button class="btn btn-ghost" id="send-brief" style="margin-top:10px" ${locked ? 'disabled' : ''}>Envoyer ma demande</button>
       ${data.design_requests.map((r) => `<div class="list-item small"><div class="grow">${esc(r.brief.slice(0, 120))}${r.admin_note ? `<div class="muted">Réponse : ${esc(r.admin_note)}</div>` : ''}</div><span class="badge ${r.status === 'livre' ? 'badge-ok' : r.status === 'en_cours' ? 'badge-brand' : ''}">${{ nouveau: 'Reçue', en_cours: 'En cours', livre: 'Livrée' }[r.status]}</span></div>`).join('')}
     </div>`;
+    $('#buy-custom')?.addEventListener('click', async () => {
+      try {
+        const r = await api(P('/site/custom'), { method: 'POST', body: { brief: $('#custom-brief').value } });
+        if (r.checkout_url) { location.href = r.checkout_url; return; }
+        toast('Commande enregistrée : notre équipe vous contacte sous 48 h.'); renderSiteEditor();
+      } catch (err) { toast(err.message, 'error'); }
+    });
     $('#go-premium')?.addEventListener('click', async () => { if (await choosePlan('premium')) { toast('Formule Premium activée.'); renderSiteEditor(); } });
     $('#send-brief')?.addEventListener('click', async () => {
       try {

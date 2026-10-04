@@ -92,7 +92,10 @@ function depositCheckout({ salon, booking, serviceName, successUrl, cancelUrl, c
       price_data: { currency: currency(), unit_amount: booking.deposit_cents, product_data: { name: `Acompte — ${serviceName} (${salon.name})` } },
     }],
     metadata: { kind: 'deposit', booking_id: String(booking.id), salon_id: String(salon.id) },
-    payment_intent_data: { metadata: { kind: 'deposit', booking_id: String(booking.id) } },
+    payment_intent_data: {
+      metadata: { kind: 'deposit', booking_id: String(booking.id) },
+      ...(require('./plans').platformFee(booking.deposit_cents) ? { application_fee_amount: require('./plans').platformFee(booking.deposit_cents) } : {}),
+    },
     expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
     success_url: successUrl,
     cancel_url: cancelUrl,

@@ -5,6 +5,7 @@ process.env.LUMEA_NOW = '2026-10-05T08:00';
 process.env.SESSION_SECRET = 'test-secret';
 process.env.STRIPE_SECRET_KEY = 'sk_test_fake';
 process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test';
+process.env.PLATFORM_FEE_PERCENT = '2';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -129,7 +130,7 @@ test('template rental via Stripe, cancelled at period end', async () => {
   assert.equal(stripeCalls.at(-1).params.get('cancel_at_period_end'), 'true');
 });
 
-test('deposits: 0 % commission direct charge on the salon account, confirm, refund, expiry', async () => {
+test('deposits: direct charge on the salon account with the configured platform fee on the salon account, confirm, refund, expiry', async () => {
   const salon = makeSalon('dep@test.ch');
   run("UPDATE salons SET plan = 'essentiel', deposit_percent = 30, cancel_hours = 2 WHERE id = ?", salon.id);
 
@@ -151,7 +152,7 @@ test('deposits: 0 % commission direct charge on the salon account, confirm, refu
   const call = stripeCalls.find((x) => x.path === '/checkout/sessions' && x.account === 'acct_salon');
   assert.ok(call, 'charged on the connected account');
   assert.equal(call.params.get('line_items[0][price_data][unit_amount]'), '3000');
-  assert.equal(call.params.get('payment_intent_data[application_fee_amount]'), null, 'no platform fee');
+  assert.equal(call.params.get('payment_intent_data[application_fee_amount]'), '60', 'configurable platform fee: 2 % of 30 CHF');
   let row = one('SELECT * FROM bookings WHERE token = ?', b.body.token);
   assert.equal(row.payment_status, 'pending');
   assert.equal(one("SELECT COUNT(*) AS n FROM notifications WHERE booking_id = ? AND kind = 'confirmation'", row.id).n, 0, 'no confirmation before payment');
@@ -190,4 +191,24 @@ test('password reset and CSV import', async () => {
   assert.deepEqual(r.body, { imported: 2, updated: 1, skipped: 1 });
   const julie = one("SELECT * FROM clients WHERE email = 'julie@x.ch'");
   assert.equal(julie.notes, 'Couleur 7.1; allergie');
+});
+
+test('sponsored placement and paid custom website go through Stripe', async () => {
+  const salon = makeSalon('boost@test.ch');
+  run("UPDATE salons SET plan = 'essentiel' WHERE id = ?", salon.id);
+  const cookie = await login('boost@test.ch');
+  const r = await req('/api/pro/boost', { method: 'POST', cookie, body: {} });
+  assert.ok(r.body.checkout_url);
+  await webhook({ id: 'evt_boost', type: 'checkout.session.completed', data: { object: { mode: 'subscription', payment_status: 'paid', subscription: 'sub_boost', metadata: { kind: 'boost', salon_id: String(salon.id) } } } });
+  const list = await req('/api/public/salons');
+  assert.equal(list.body[0].id, salon.id, 'sponsored salon listed first');
+  assert.equal(list.body[0].sponsored, true);
+  assert.equal(list.body[0].boost_until, undefined, 'internal fields stay private');
+
+  const c = await req('/api/pro/site/custom', { method: 'POST', cookie, body: { brief: 'Ambiance chaleureuse, bois et vert sauge, photos du salon.' } });
+  assert.ok(c.body.checkout_url);
+  const call = stripeCalls.at(-1);
+  assert.equal(call.params.get('line_items[0][price_data][unit_amount]'), '25000');
+  await webhook({ id: 'evt_custom', type: 'checkout.session.completed', data: { object: { mode: 'payment', payment_status: 'paid', metadata: { kind: 'custom_site', salon_id: String(salon.id), brief: 'Ambiance chaleureuse', price: '250' } } } });
+  assert.equal(one('SELECT paid_chf FROM design_requests WHERE salon_id = ?', salon.id).paid_chf, 250);
 });

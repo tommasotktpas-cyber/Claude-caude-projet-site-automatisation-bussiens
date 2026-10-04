@@ -147,6 +147,29 @@ router.post('/plan', async (req, res) => {
   res.json({ checkout_url: session.url });
 });
 
+// Sponsored placement on the marketplace home page.
+router.post('/boost', async (req, res) => {
+  const { BOOST_PRICE } = require('../plans');
+  if (!payments.enabled()) {
+    billing.activateBoost(req.salon.id, null);
+    return res.json({ ok: true, simulated: true });
+  }
+  const session = await payments.platformCheckout({
+    salon: req.salon, mode: 'subscription', name: `Mise en avant Lumea — ${req.salon.name}`, amountChf: BOOST_PRICE,
+    metadata: { kind: 'boost', salon_id: String(req.salon.id) }, successUrl: `${APP_URL}/app#billing`, cancelUrl: `${APP_URL}/app#billing`,
+  });
+  res.json({ checkout_url: session.url });
+});
+
+router.delete('/boost', (req, res) => {
+  if (req.salon.boost_subscription_id && payments.enabled()) {
+    payments.cancelSubscription(req.salon.boost_subscription_id, { atPeriodEnd: true }).catch((err) => console.error('[boost]', err.message));
+    return res.json({ ok: true, until: req.salon.boost_until });
+  }
+  run("UPDATE salons SET boost_until = '' WHERE id = ?", req.salon.id);
+  res.json({ ok: true });
+});
+
 // Stripe customer portal: card, invoices, cancellation — handled by Stripe.
 router.post('/billing/portal', async (req, res) => {
   if (!payments.enabled() || !req.salon.stripe_customer_id) throw new HttpError(400, 'Aucun abonnement payant à gérer pour le moment.');
@@ -707,6 +730,7 @@ router.get('/site', (req, res) => {
     url: siteUrl(req.salon),
     licenses: all('SELECT * FROM template_licenses WHERE salon_id = ? ORDER BY created_at DESC', req.salon.id),
     design_requests: all('SELECT * FROM design_requests WHERE salon_id = ? ORDER BY created_at DESC', req.salon.id),
+    custom_site_price: require('../plans').CUSTOM_SITE_PRICE,
   });
 });
 
@@ -781,6 +805,23 @@ router.delete('/site/licenses/:id', (req, res) => {
   }
   run("UPDATE template_licenses SET active = 0, cancelled_at = datetime('now') WHERE id = ?", l.id);
   res.json({ ok: true });
+});
+
+// One-off "we build your site" service, available on every plan.
+router.post('/site/custom', async (req, res) => {
+  const { CUSTOM_SITE_PRICE } = require('../plans');
+  const brief = clean(req.body?.brief, 450);
+  if (brief.length < 20) throw new HttpError(400, 'Décrivez votre projet en quelques phrases (20 caractères minimum).');
+  if (!payments.enabled()) {
+    billing.addCustomSiteRequest(req.salon.id, brief, CUSTOM_SITE_PRICE);
+    return res.status(201).json({ ok: true, simulated: true });
+  }
+  const session = await payments.platformCheckout({
+    salon: req.salon, mode: 'payment', name: `Création de site sur mesure — ${req.salon.name}`, amountChf: CUSTOM_SITE_PRICE,
+    metadata: { kind: 'custom_site', salon_id: String(req.salon.id), brief, price: String(CUSTOM_SITE_PRICE) },
+    successUrl: `${APP_URL}/app#site`, cancelUrl: `${APP_URL}/app#site`,
+  });
+  res.json({ checkout_url: session.url });
 });
 
 router.post('/site/design-requests', (req, res) => {

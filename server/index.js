@@ -51,7 +51,8 @@ function createApp() {
   });
 
   app.get('/js/config.js', (_req, res) => {
-    res.type('application/javascript').send(`window.LUMEA_CONFIG = ${JSON.stringify({ currency: CURRENCY })};`);
+    const { PLATFORM_FEE_PERCENT, CUSTOM_SITE_PRICE, BOOST_PRICE } = require('./plans');
+    res.type('application/javascript').send(`window.LUMEA_CONFIG = ${JSON.stringify({ currency: CURRENCY, platform_fee: PLATFORM_FEE_PERCENT, custom_site_price: CUSTOM_SITE_PRICE, boost_price: BOOST_PRICE })};`);
   });
 
   // Each salon's own website.
@@ -78,7 +79,8 @@ function createApp() {
   app.use('/api/admin', require('./routes/admin'));
   app.get('/api/plans', (_req, res) => {
     const { PLANS, TEMPLATE_PRICING } = require('./plans');
-    res.json({ plans: PLANS, template_pricing: TEMPLATE_PRICING, currency: CURRENCY, templates: TEMPLATES.length });
+    const extra = require('./plans');
+    res.json({ plans: PLANS, template_pricing: TEMPLATE_PRICING, currency: CURRENCY, templates: TEMPLATES.length, platform_fee: extra.PLATFORM_FEE_PERCENT, custom_site_price: extra.CUSTOM_SITE_PRICE, boost_price: extra.BOOST_PRICE });
   });
 
   // Subscribable agenda feed (Google Calendar, Apple Calendar, Outlook).

@@ -47,6 +47,7 @@ function subscriptionEnded(subscriptionId) {
     run("UPDATE salons SET plan = 'trial', trial_ends_at = ?, stripe_subscription_id = NULL WHERE id = ?", T.addDays(T.now().date, -1), salon.id);
   }
   run("UPDATE template_licenses SET active = 0, cancelled_at = COALESCE(cancelled_at, datetime('now')) WHERE stripe_subscription_id = ?", subscriptionId);
+  run("UPDATE salons SET boost_until = '', boost_subscription_id = NULL WHERE boost_subscription_id = ?", subscriptionId);
 }
 
 /** Deposit paid → booking confirmed for good; confirmation messages go out now. */
@@ -72,6 +73,16 @@ function refundDeposit(booking) {
   payments.refund(booking.stripe_payment_intent, salon.stripe_account_id)
     .then(() => run("UPDATE bookings SET payment_status = 'refunded', paid_cents = 0 WHERE id = ?", booking.id))
     .catch((err) => console.error('[billing] refund failed:', err.message));
+}
+
+/** Sponsored placement: one month, renewed while the subscription runs. */
+function activateBoost(salonId, subscriptionId) {
+  run('UPDATE salons SET boost_until = ?, boost_subscription_id = COALESCE(?, boost_subscription_id) WHERE id = ?', T.addDays(T.now().date, 31), subscriptionId || null, salonId);
+}
+
+/** Paid one-off website design → request for the design team (shown in the admin console). */
+function addCustomSiteRequest(salonId, brief, priceChf) {
+  run('INSERT INTO design_requests (salon_id, brief, paid_chf) VALUES (?,?,?)', salonId, brief || 'Création de site sur mesure (payée)', priceChf);
 }
 
 /** Online gift card paid → active, code e-mailed to the buyer. */
@@ -117,6 +128,11 @@ async function handleStripeEvent(event) {
         if (obj.customer) run('UPDATE salons SET stripe_customer_id = COALESCE(stripe_customer_id, ?) WHERE id = ?', obj.customer, Number(meta.salon_id));
       } else if (meta.kind === 'deposit') markDepositPaid(Number(meta.booking_id), obj.payment_intent);
       else if (meta.kind === 'gift_card') activateGiftCard(Number(meta.gift_card_id));
+      else if (meta.kind === 'boost') activateBoost(Number(meta.salon_id), obj.subscription);
+      else if (meta.kind === 'custom_site') addCustomSiteRequest(Number(meta.salon_id), meta.brief || '', Number(meta.price) || 0);
+      break;
+    case 'invoice.paid':
+      if (obj.subscription) run('UPDATE salons SET boost_until = ? WHERE boost_subscription_id = ?', T.addDays(T.now().date, 31), obj.subscription);
       break;
     case 'customer.subscription.deleted':
       subscriptionEnded(obj.id);
@@ -132,5 +148,5 @@ async function handleStripeEvent(event) {
 
 module.exports = {
   salonActive, depositMode, activatePlan, addLicense, subscriptionEnded, markDepositPaid, refundDeposit,
-  releaseUnpaidHolds, handleStripeEvent, activateGiftCard,
+  releaseUnpaidHolds, handleStripeEvent, activateGiftCard, activateBoost, addCustomSiteRequest,
 };

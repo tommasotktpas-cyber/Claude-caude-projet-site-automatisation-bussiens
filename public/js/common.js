@@ -154,7 +154,7 @@ async function mountChrome() {
       <div class="container">
         <div class="cols">
           <div><a class="logo" href="/"><span class="logo-mark" aria-hidden="true"></span>Lumea</a>
-            <p style="margin-top:12px;max-width:320px">La réservation beauté sans commission. Pensée pour les salons indépendants, adorée par leurs clients.</p></div>
+            <p style="margin-top:12px;max-width:320px">La réservation beauté, simple et sans engagement. Pensée pour les salons indépendants, adorée par leurs clients.</p></div>
           <div><h4>Clients</h4><a href="/#salons">Trouver un salon</a><a href="/connexion">Mon compte</a></div>
           <div><h4>Professionnels</h4><a href="/pro">Fonctionnalités</a><a href="/pro#modeles">Modèles de site</a><a href="/pro#tarifs">Tarifs</a><a href="/connexion?pro=1">Créer mon salon</a></div>
           <div><h4>Lumea</h4><a href="/mentions">Mentions légales</a><a href="/mentions#cgu">CGU</a><a href="/mentions#rgpd">Confidentialité</a></div>
@@ -203,4 +203,12 @@ document.addEventListener('click', async (e) => {
   await deferredInstall.userChoice.catch(() => {});
   deferredInstall = null;
   b.hidden = true;
+});
+
+// Commercial wording adapts to the platform fee configured on the server (PLATFORM_FEE_PERCENT).
+document.addEventListener('DOMContentLoaded', () => {
+  const fee = Number(window.LUMEA_CONFIG?.platform_fee || 0);
+  document.querySelectorAll('[data-fee]').forEach((el) => { el.textContent = `${String(fee).replace('.', ',')} %`; });
+  document.querySelectorAll('[data-if-fee]').forEach((el) => { el.hidden = !fee; });
+  document.querySelectorAll('[data-if-nofee]').forEach((el) => { el.hidden = !!fee; });
 });

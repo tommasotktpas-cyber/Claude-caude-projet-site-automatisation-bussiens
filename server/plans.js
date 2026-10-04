@@ -8,7 +8,7 @@ const PLANS = [
     id: 'essentiel', name: 'Essentiel', price: 100, max_staff: 0,
     tagline: 'Tout pour gérer et remplir votre salon.',
     features: [
-      'Réservation en ligne 24/7, 0 % de commission',
+      'Réservation en ligne 24/7, sans commission sur les rendez-vous',
       'Agenda multi-collaborateurs illimité',
       'Rappels automatiques, liste d’attente, avis vérifiés',
       'Acompte anti no-show & programme de fidélité',
@@ -38,6 +38,19 @@ const PLANS = [
 /** Premium templates on the Essentiel plan. */
 const TEMPLATE_PRICING = { once: 300, monthly: 20 };
 
+/** Website made for the salon by a designer (one-off), available on every plan. */
+const CUSTOM_SITE_PRICE = Number(process.env.CUSTOM_SITE_PRICE || 250);
+
+/** Sponsored placement on the marketplace home page (never ads on the salons' own pages). */
+const BOOST_PRICE = Number(process.env.BOOST_PRICE || 29);
+
+/**
+ * Platform fee on online payments (deposits, gift cards), in percent. 0 by default:
+ * "0 % commission" is the core sales argument. The public pages adapt their wording to this value.
+ */
+const PLATFORM_FEE_PERCENT = Math.max(0, Math.min(20, Number(process.env.PLATFORM_FEE_PERCENT || 0)));
+const platformFee = (amountCents) => Math.round((amountCents * PLATFORM_FEE_PERCENT) / 100);
+
 const planById = (id) => PLANS.find((p) => p.id === id);
 
-module.exports = { PLANS, TEMPLATE_PRICING, CURRENCY, planById };
+module.exports = { PLANS, TEMPLATE_PRICING, CURRENCY, CUSTOM_SITE_PRICE, BOOST_PRICE, PLATFORM_FEE_PERCENT, platformFee, planById };

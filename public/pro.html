@@ -21,7 +21,7 @@
       <div class="container" style="display:grid;grid-template-columns:1.1fr 1fr;gap:40px;align-items:center" id="hero-grid">
         <div>
           <span class="badge badge-brand">Pour coiffeurs, barbiers, instituts, spas</span>
-          <h1 style="margin-top:16px">Un agenda plein.<br><em>Zéro commission.</em></h1>
+          <h1 style="margin-top:16px">Un agenda plein.<br><em data-if-nofee>Zéro commission.</em><em data-if-fee hidden>Tout-en-un.</em></h1>
           <p class="lead">Lumea remplace le téléphone, le carnet papier et les plateformes qui prélèvent 20 à 25 % sur vos nouveaux clients. Vous gardez 100 % de votre chiffre d’affaires.</p>
           <div class="row" style="margin-top:24px">
             <a href="/connexion?pro=1" class="btn btn-brand btn-lg">Démarrer l’essai gratuit</a>
@@ -67,7 +67,7 @@
         <table class="compare">
           <thead><tr><th></th><th class="us">Lumea</th><th>Marketplaces beauté</th><th>Logiciels traditionnels</th></tr></thead>
           <tbody>
-            <tr><td>Commission sur nouveaux clients</td><td class="us yes">0 %*</td><td class="no">20 – 25 %</td><td>0 %</td></tr>
+            <tr><td>Commission sur nouveaux clients</td><td class="us yes"><span data-if-nofee>0 %*</span><span data-if-fee hidden>0 %, puis <span data-fee></span> sur les paiements en ligne*</span></td><td class="no">20 – 25 %</td><td>0 %</td></tr>
             <tr><td>Abonnement mensuel</td><td class="us">100 CHF tout inclus (158 CHF avec site sur mesure)</td><td>0 – 30 CHF + commissions</td><td>50 – 200 CHF selon modules</td></tr>
             <tr><td>Studio coupe 3D à la réservation</td><td class="us yes">✓</td><td class="no">—</td><td class="no">—</td></tr>
             <tr><td>Caisse, stock et cartes cadeaux</td><td class="us yes">✓ inclus</td><td>Partiel</td><td>Module payant</td></tr>
@@ -85,7 +85,7 @@
           </tbody>
         </table>
       </div>
-      <p class="small muted" style="margin-top:8px">* Aucune commission Lumea. Acomptes en ligne : frais bancaires Stripe standards, payés directement par le salon (≈ 2,9 % + 0.30 CHF par carte, ≈ 1,3 % TWINT).</p>
+      <p class="small muted" style="margin-top:8px">* <span data-if-nofee>Aucune commission Lumea.</span><span data-if-fee hidden>Aucune commission sur les rendez-vous ; <span data-fee></span> sur les paiements encaissés en ligne (acomptes, cartes cadeaux).</span> Acomptes en ligne : frais bancaires Stripe standards, payés directement par le salon (≈ 2,9 % + 0.30 CHF par carte, ≈ 1,3 % TWINT).</p>
       <div class="card" style="margin-top:18px" id="calc">
         <div class="row between"><div><h3 style="margin:0">Combien vous coûte une commission de 25 % ?</h3><p class="muted small" style="margin:4px 0 0">Déplacez le curseur : nouveaux clients par mois via une marketplace.</p></div>
           <b class="display" style="font-size:2rem;color:var(--danger)" id="calc-out">—</b></div>
@@ -119,7 +119,7 @@
     </section>
 
     <section class="section container" id="tarifs" style="scroll-margin-top:80px">
-      <div class="section-head center" style="margin-inline:auto"><div class="eyebrow">Tarifs</div><h2>Simple, transparent, sans commission.</h2><p class="muted">Prix en CHF HT, par établissement. Sans engagement, changez de formule à tout moment.</p></div>
+      <div class="section-head center" style="margin-inline:auto"><div class="eyebrow">Tarifs</div><h2>Simple, transparent<span data-if-nofee>, sans commission</span>.</h2><p class="muted">Prix en CHF HT, par établissement. Sans engagement, changez de formule à tout moment.</p></div>
       <div class="pricing" id="plans"></div>
     </section>
 
@@ -136,7 +136,7 @@
 
     <section class="section narrow">
       <h2 class="center">Questions fréquentes</h2>
-      <details class="faq"><summary>Prenez-vous une commission sur les réservations ?</summary><p>Non, jamais. Vous payez un abonnement fixe, que vous ayez 10 ou 1 000 réservations dans le mois, y compris pour les clients trouvés via la marketplace Lumea. Si vous activez les acomptes en ligne, l’argent arrive directement sur <b>votre</b> compte Stripe : seuls les frais bancaires standards de Stripe s’appliquent (environ 2,9 % + 0.30 CHF par carte, environ 1,3 % avec TWINT), Lumea ne prélève rien.</p></details>
+      <details class="faq"><summary>Prenez-vous une commission sur les réservations ?</summary><p><span data-if-fee hidden>Aucune sur les rendez-vous. Sur les paiements encaissés en ligne (acomptes, cartes cadeaux), nous prélevons <span data-fee></span>, en plus des frais Stripe. </span><span data-if-nofee>Non, jamais.</span> Vous payez un abonnement fixe, que vous ayez 10 ou 1 000 réservations dans le mois, y compris pour les clients trouvés via la marketplace Lumea. Si vous activez les acomptes en ligne, l’argent arrive directement sur <b>votre</b> compte Stripe : seuls les frais bancaires standards de Stripe s’appliquent (environ 2,9 % + 0.30 CHF par carte, environ 1,3 % avec TWINT), Lumea ne prélève rien.</p></details>
       <details class="faq"><summary>Je suis engagé chez un autre logiciel, comment changer ?</summary><p>Exportez votre fichier clients (CSV) depuis votre logiciel actuel et importez-le dans Lumea en un clic : noms, e-mails, téléphones et notes. Démarrez l’essai gratuit de 30 jours en parallèle, puis basculez quand votre contrat actuel se termine.</p></details>
       <details class="faq"><summary>Mes employés ont-ils leur propre accès ?</summary><p>Oui. Chaque collaborateur reçoit son identifiant et voit uniquement son agenda et ses clients, sans accès au chiffre d’affaires ni aux réglages.</p></details>
       <details class="faq"><summary>Quelle différence entre Essentiel et Premium ?</summary><p>Les deux incluent toute la gestion du salon et votre propre site. Premium ajoute un site personnalisé conçu avec vous par notre équipe, tous les modèles premium, votre nom de domaine (www.votre-salon.ch), la personnalisation avancée et le retrait de la mention Lumea.</p></details>

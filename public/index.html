@@ -68,7 +68,7 @@
       <div class="cta-band">
         <div>
           <div class="eyebrow">Vous êtes professionnel ?</div>
-          <h2 style="color:#fff">Remplissez votre agenda, sans payer de commission.</h2>
+          <h2 style="color:#fff">Remplissez votre agenda, tout au même endroit.</h2>
           <p>Agenda, réservation en ligne, rappels SMS, acompte anti no-show, statistiques — et votre propre site internet. Dès 100 CHF / mois, 30 jours offerts, sans engagement.</p>
         </div>
         <div class="row" style="justify-content:flex-end;position:relative;z-index:1">
@@ -97,7 +97,7 @@
       return `
         <a class="card card-hover salon-card" href="/salon.html?s=${encodeURIComponent(s.slug)}">
           <div class="cover" style="--c:${esc(s.accent)};${s.cover_url ? `background-image:url('${esc(s.cover_url)}')` : ''}">
-            <span class="badge">${esc(CATEGORY_LABELS[s.category] || s.category)}</span>
+            <span class="badge">${esc(CATEGORY_LABELS[s.category] || s.category)}</span>${s.sponsored ? '<span class="badge" style="left:auto;right:12px">Sponsorisé</span>' : ''}
             ${s.cover_url ? '' : `<span class="initials">${esc(fmt.initials(s.name))}</span>`}
           </div>
           <div class="body">

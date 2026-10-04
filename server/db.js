@@ -352,6 +352,9 @@ CREATE TABLE IF NOT EXISTS stock_movements (
 `);
 addColumn('salons', 'giftcards_enabled', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('sales', 'prepaid_cents', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('salons', 'boost_until', "TEXT NOT NULL DEFAULT ''");
+addColumn('salons', 'boost_subscription_id', 'TEXT');
+addColumn('design_requests', 'paid_chf', 'INTEGER NOT NULL DEFAULT 0');
 
 // Retention & last-minute features.
 {
