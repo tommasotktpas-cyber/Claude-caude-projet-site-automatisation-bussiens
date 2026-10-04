@@ -22,7 +22,7 @@ function createApp() {
     if (!(req.path === '/salon.html' && req.query.embed === '1')) res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     next();
   });
-  app.use(express.json({ limit: '100kb' }));
+  app.use((req, res, next) => (req.path === '/api/pro/clients/import' ? next() : express.json({ limit: '100kb' })(req, res, next)));
   app.use(sessionMiddleware);
 
   // Premium: a salon's own domain (www.mon-salon.ch) serves its website at "/".

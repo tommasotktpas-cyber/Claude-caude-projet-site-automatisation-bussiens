@@ -4,6 +4,10 @@ const { one, all, run, tx } = require('../db');
 const { hashPassword, verifyPassword, setSession, clearSession, rateLimit, requireRole } = require('../auth');
 const { HttpError, clean, EMAIL_RE } = require('../bookings');
 const { createSalon } = require('../salons');
+const crypto = require('node:crypto');
+const { randomToken } = require('../auth');
+const { send } = require('../mailer');
+const { APP_URL } = require('../notifications');
 
 const router = express.Router();
 const limiter = rateLimit('auth', 15, 15 * 60 * 1000);
@@ -60,6 +64,36 @@ router.post('/login', limiter, (req, res) => {
   }
   setSession(res, user.id);
   res.json({ ok: true, role: user.role });
+});
+
+const sha256 = (v) => crypto.createHash('sha256').update(v).digest('hex');
+
+// Password reset: always answers OK (does not reveal whether an account exists).
+router.post('/forgot', limiter, (req, res) => {
+  const email = clean(req.body?.email, 160).toLowerCase();
+  const user = EMAIL_RE.test(email) && one('SELECT id, name, email FROM users WHERE email = ?', email);
+  if (user) {
+    const token = randomToken(24);
+    run('INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES (?,?,?)', sha256(token), user.id, Date.now() + 60 * 60 * 1000);
+    const body = `Bonjour ${user.name},\n\nPour choisir un nouveau mot de passe, ouvrez ce lien (valable 1 heure) :\n${APP_URL}/reset.html?t=${token}\n\nSi vous n’êtes pas à l’origine de cette demande, ignorez cet e-mail.`;
+    run("INSERT INTO notifications (kind, channel, recipient, subject, body) VALUES ('password_reset','email',?,?,?)", user.email, 'Réinitialisation de votre mot de passe', body);
+    send({ kind: 'password_reset', channel: 'email', to: user.email, subject: 'Réinitialisation de votre mot de passe', body });
+  }
+  res.json({ ok: true });
+});
+
+router.post('/reset', limiter, (req, res) => {
+  const token = String(req.body?.token || '');
+  const password = String(req.body?.password || '');
+  if (password.length < 8) throw new HttpError(400, 'Le mot de passe doit contenir au moins 8 caractères.');
+  const row = one('SELECT * FROM password_resets WHERE token_hash = ?', sha256(token));
+  if (!row || row.used || row.expires_at < Date.now()) throw new HttpError(400, 'Lien expiré ou déjà utilisé. Refaites une demande.');
+  tx(() => {
+    run('UPDATE password_resets SET used = 1 WHERE user_id = ?', row.user_id);
+    run('UPDATE users SET password_hash = ? WHERE id = ?', hashPassword(password), row.user_id);
+  });
+  setSession(res, row.user_id);
+  res.json({ ok: true, role: one('SELECT role FROM users WHERE id = ?', row.user_id).role });
 });
 
 router.post('/logout', (_req, res) => {

@@ -378,9 +378,10 @@ function moveBooking(b, after) {
 async function renderClients(q = '') {
   const list = await api(P(`/clients?q=${encodeURIComponent(q)}`));
   if (!$('#client-q')) {
-    view.innerHTML = `${head('Clients', `<a class="btn btn-ghost" href="${P('/export/clients.csv')}">Exporter CSV</a>`)}
+    view.innerHTML = `${head('Clients', `<button class="btn btn-ghost" id="import-clients">Importer</button><a class="btn btn-ghost" href="${P('/export/clients.csv')}">Exporter CSV</a>`)}
       <div class="card" style="padding:14px;margin-bottom:14px"><input id="client-q" placeholder="Rechercher par nom, e-mail ou téléphone…" value="${esc(q)}"></div>
       <div class="table-wrap"><table><thead><tr><th>Client</th><th>Contact</th><th>Visites</th><th>Dépensé</th><th>Absences</th><th>Dernier RDV</th></tr></thead><tbody id="client-rows"></tbody></table></div>`;
+    $('#import-clients').onclick = importClients;
     let t;
     $('#client-q').oninput = (e) => { clearTimeout(t); t = setTimeout(() => renderClients(e.target.value), 250); };
   }
@@ -396,6 +397,33 @@ async function renderClients(q = '') {
     const tr = e.target.closest('[data-client]');
     if (tr) clientDetail(Number(tr.dataset.client));
   };
+}
+
+function importClients() {
+  modal({
+    title: 'Importer vos clients',
+    body: `<p class="small">Récupérez votre fichier clients depuis votre ancien logiciel (Salonkee, Planity, Excel, Google Contacts…) au format <b>CSV</b>. La première ligne doit contenir les titres des colonnes : <i>Nom</i> (ou <i>Prénom</i> + <i>Nom de famille</i>), <i>E-mail</i>, <i>Téléphone</i>, <i>Notes</i>.</p>
+      <input type="file" id="csv-file" accept=".csv,text/csv,.txt">
+      <div id="csv-preview" class="small muted" style="margin-top:12px"></div>
+      <p class="small muted">Les clients déjà présents (même e-mail ou même téléphone) ne sont pas dupliqués. Depuis Excel : Fichier › Enregistrer sous › CSV UTF-8.</p>`,
+    actions: [{ id: 'close', label: 'Annuler', cls: 'btn-ghost' }, {
+      id: 'go', label: 'Importer', cls: 'btn-brand',
+      handler: async (d) => {
+        const file = $('#csv-file', d).files[0];
+        if (!file) throw new Error('Choisissez un fichier CSV.');
+        const r = await api(P('/clients/import'), { method: 'POST', body: { csv: await file.text() } });
+        toast(`${r.imported} client(s) importé(s), ${r.updated} mis à jour, ${r.skipped} ignoré(s).`);
+        renderClients();
+      },
+    }],
+    onOpen: (d) => {
+      $('#csv-file', d).onchange = async (e) => {
+        const text = await e.target.files[0].text();
+        const lines = text.split(/\r?\n/).filter(Boolean);
+        $('#csv-preview', d).innerHTML = `<b>${lines.length - 1} ligne(s)</b> détectée(s). Aperçu :<pre style="white-space:pre-wrap;background:var(--surface-2);padding:10px;border-radius:10px;max-height:140px;overflow:auto">${esc(lines.slice(0, 4).join('\n'))}</pre>`;
+      };
+    },
+  });
 }
 
 async function clientDetail(id) {

@@ -24,7 +24,8 @@
         <div class="field"><label for="l-email">E-mail</label><input id="l-email" name="email" type="email" required autocomplete="email"></div>
         <div class="field"><label for="l-pass">Mot de passe</label><input id="l-pass" name="password" type="password" required autocomplete="current-password"></div>
         <button class="btn btn-brand btn-block btn-lg">Se connecter</button>
-        <p class="small muted center" style="margin-top:14px">Démo pro : demo@lumea.app / demo1234</p>
+        <p class="small center" style="margin-top:12px"><button type="button" class="link" id="forgot">Mot de passe oublié ?</button></p>
+        <p class="small muted center" style="margin-top:6px">Démo pro : demo@lumea.app / demo1234</p>
       </form>
 
       <form id="form-register" data-pane="register" class="hidden">
@@ -88,6 +89,18 @@
       }
     });
     bind('#form-login', '/api/auth/login');
+    $('#forgot').onclick = () => modal({
+      title: 'Mot de passe oublié',
+      body: '<p class="muted small">Indiquez votre e-mail : vous recevrez un lien pour choisir un nouveau mot de passe.</p><input id="forgot-email" type="email" placeholder="vous@exemple.ch">',
+      actions: [{ id: 'close', label: 'Annuler', cls: 'btn-ghost' }, {
+        id: 'send', label: 'Envoyer le lien', cls: 'btn-brand',
+        handler: async (d) => {
+          await api('/api/auth/forgot', { method: 'POST', body: { email: $('#forgot-email', d).value } });
+          toast('Si un compte existe, un e-mail vient de vous être envoyé.');
+        },
+      }],
+      onOpen: (d) => { $('#forgot-email', d).value = $('#l-email').value; },
+    });
     bind('#form-register', '/api/auth/register');
     bind('#form-pro', '/api/auth/register-pro');
   </script>

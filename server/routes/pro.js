@@ -4,7 +4,8 @@ const { one, all, run, tx } = require('../db');
 const T = require('../time');
 const { requireRole } = require('../auth');
 const { getSlots } = require('../availability');
-const { createBooking, rescheduleBooking, setStatus, HttpError, clean } = require('../bookings');
+const { createBooking, rescheduleBooking, setStatus, HttpError, clean, EMAIL_RE } = require('../bookings');
+const { randomToken } = require('../auth');
 const { CATEGORIES } = require('../salons');
 const { runAutomations, APP_URL } = require('../notifications');
 const { PLANS, TEMPLATE_PRICING, CURRENCY } = require('../plans');
@@ -321,6 +322,40 @@ router.put('/clients/:id', (req, res) => {
     clean(b.notes, 2000), b.phone === undefined ? null : clean(b.phone, 40), Number(req.params.id), req.salon.id);
   if (!r.changes) throw new HttpError(404, 'Client introuvable.');
   res.json({ ok: true });
+});
+
+router.post('/clients/import', express.json({ limit: '5mb' }), (req, res) => {
+  const { parseCsv, mapHeaders } = require('../csv');
+  const rows = parseCsv(req.body?.csv);
+  if (rows.length < 2) throw new HttpError(400, 'Fichier vide ou illisible. Exportez vos clients au format CSV (Excel : Fichier › Enregistrer sous › CSV).');
+  const map = mapHeaders(rows[0]);
+  if (map.name === undefined && map.first === undefined && map.last === undefined) {
+    throw new HttpError(400, 'Colonne « Nom » introuvable. La première ligne doit contenir les titres (Nom, Prénom, E-mail, Téléphone…).');
+  }
+  const get = (r, k) => (map[k] === undefined ? '' : String(r[map[k]] ?? '').trim());
+  const stats = { imported: 0, updated: 0, skipped: 0 };
+  tx(() => {
+    for (const r of rows.slice(1, 20001)) {
+      const name = clean(get(r, 'name') || [get(r, 'first'), get(r, 'last')].filter(Boolean).join(' '), 120);
+      let email = clean(get(r, 'email'), 160).toLowerCase();
+      const phone = clean(get(r, 'phone'), 40);
+      const notes = clean(get(r, 'notes'), 2000);
+      if (name.length < 2 || (!email && !phone)) { stats.skipped++; continue; }
+      if (email && !EMAIL_RE.test(email)) email = '';
+      const existing = email
+        ? one('SELECT id FROM clients WHERE salon_id = ? AND email = ?', req.salon.id, email)
+        : one("SELECT id FROM clients WHERE salon_id = ? AND phone = ? AND phone != ''", req.salon.id, phone);
+      if (existing) {
+        run("UPDATE clients SET phone = CASE WHEN phone = '' THEN ? ELSE phone END, notes = CASE WHEN notes = '' THEN ? ELSE notes END WHERE id = ?", phone, notes, existing.id);
+        stats.updated++;
+      } else {
+        run('INSERT INTO clients (salon_id, name, email, phone, notes) VALUES (?,?,?,?,?)',
+          req.salon.id, name, email || `client-${randomToken(6).toLowerCase()}@sans-email.invalid`, phone, notes);
+        stats.imported++;
+      }
+    }
+  });
+  res.json(stats);
 });
 
 router.get('/export/clients.csv', (req, res) => {

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nouveau mot de passe — Lumea</title>
+  <meta name="robots" content="noindex">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+  <header id="site-header"></header>
+  <main class="narrow" style="max-width:480px;padding-top:48px">
+    <form class="card pad-lg" id="reset-form">
+      <h1 style="font-size:1.8rem">Nouveau mot de passe</h1>
+      <div class="field"><label for="p1">Mot de passe</label><input id="p1" type="password" minlength="8" required autocomplete="new-password"><div class="hint">8 caractères minimum.</div></div>
+      <div class="field"><label for="p2">Confirmation</label><input id="p2" type="password" minlength="8" required autocomplete="new-password"></div>
+      <button class="btn btn-brand btn-block btn-lg">Enregistrer</button>
+    </form>
+  </main>
+  <footer id="site-footer"></footer>
+  <script src="/js/config.js"></script>
+  <script src="/js/common.js"></script>
+  <script>
+    'use strict';
+    mountChrome();
+    $('#reset-form').onsubmit = async (e) => {
+      e.preventDefault();
+      if ($('#p1').value !== $('#p2').value) return toast('Les deux mots de passe ne correspondent pas.', 'error');
+      try {
+        const r = await api('/api/auth/reset', { method: 'POST', body: { token: new URLSearchParams(location.search).get('t'), password: $('#p1').value } });
+        toast('Mot de passe modifié.');
+        setTimeout(() => { location.href = r.role === 'pro' || r.role === 'staff' ? '/app' : r.role === 'admin' ? '/admin' : '/compte'; }, 600);
+      } catch (err) { toast(err.message, 'error'); }
+    };
+  </script>
+</body>
+</html>

@@ -237,6 +237,15 @@ CREATE TABLE IF NOT EXISTS design_requests (
 );
 `);
 
+db.exec(`
+CREATE TABLE IF NOT EXISTS password_resets (
+  token_hash TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at INTEGER NOT NULL,
+  used INTEGER NOT NULL DEFAULT 0
+);
+`);
+
 /** Runs fn inside an IMMEDIATE transaction (serialises writers — prevents double booking). */
 function tx(fn) {
   db.exec('BEGIN IMMEDIATE');

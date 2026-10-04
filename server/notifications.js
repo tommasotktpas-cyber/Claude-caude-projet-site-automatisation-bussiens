@@ -3,7 +3,7 @@ const { one, all, run } = require('./db');
 const T = require('./time');
 
 const APP_URL = (process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`).replace(/\/$/, '');
-const WEBHOOK = process.env.NOTIFY_WEBHOOK_URL || '';
+const { send } = require('./mailer');
 
 const { CURRENCY } = require('./plans');
 const euros = (cents) => new Intl.NumberFormat('fr-CH', { style: 'currency', currency: CURRENCY }).format(cents / 100);
@@ -16,7 +16,7 @@ const frDate = (iso) => {
 
 function bookingContext(bookingId) {
   return one(
-    `SELECT b.*, s.name AS salon_name, s.address, s.city, s.phone AS salon_phone, s.cancel_hours,
+    `SELECT b.*, s.name AS salon_name, s.email AS salon_email, s.address, s.city, s.phone AS salon_phone, s.cancel_hours,
             sv.name AS service_name, st.name AS staff_name, c.name AS client_name, c.email AS client_email, c.phone AS client_phone
      FROM bookings b
      JOIN salons s ON s.id = b.salon_id
@@ -57,20 +57,16 @@ const templates = {
   }),
 };
 
-async function deliver(payload) {
-  if (!WEBHOOK) return false;
-  try {
-    const res = await fetch(WEBHOOK, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    return res.ok;
-  } catch (err) {
-    console.error('[notify] webhook failed:', err.message);
-    return false;
-  }
+/** Forwards a stored notification to the real channels (see mailer.js) and flags it delivered. */
+function deliver(notificationId, payload) {
+  return send(payload)
+    .then((ok) => { if (ok) run('UPDATE notifications SET delivered = 1 WHERE id = ?', notificationId); return ok; })
+    .catch((err) => { console.error('[notify]', err.message); return false; });
 }
 
 /**
  * Queues a notification: stored in the `notifications` table (visible in the pro dashboard)
- * and forwarded to NOTIFY_WEBHOOK_URL when set (Make, Zapier, n8n, Twilio, Brevo…).
+ * and sent through Brevo and/or NOTIFY_WEBHOOK_URL when configured.
  */
 function notify(kind, bookingId) {
   const b = bookingContext(bookingId);
@@ -88,8 +84,10 @@ function notify(kind, bookingId) {
       'INSERT INTO notifications (salon_id, booking_id, kind, channel, recipient, subject, body) VALUES (?,?,?,?,?,?,?)',
       b.salon_id, b.id, kind, r.channel, r.to, subject, body,
     );
-    deliver({ kind, channel: r.channel, to: r.to, subject, body, booking_id: b.id, salon_id: b.salon_id })
-      .then((ok) => ok && run('UPDATE notifications SET delivered = 1 WHERE id = ?', info.lastInsertRowid));
+    deliver(info.lastInsertRowid, {
+      kind, channel: r.channel, to: r.to, subject, body, booking_id: b.id, salon_id: b.salon_id,
+      fromName: toPro ? 'Lumea Pro' : b.salon_name, replyTo: toPro ? undefined : b.salon_email || undefined,
+    });
   }
 }
 
@@ -99,9 +97,9 @@ function notifyWaitlist(salonId, serviceId, date) {
   for (const w of rows) {
     const subject = `Un créneau vient de se libérer chez ${salon.name}`;
     const body = `Bonjour ${w.name}, une place s'est libérée le ${date}. Réservez vite : ${APP_URL}/salon.html?s=${salon.slug}&service=${serviceId}&date=${date}`;
-    run('INSERT INTO notifications (salon_id, kind, channel, recipient, subject, body) VALUES (?,?,?,?,?,?)', salonId, 'waitlist', 'email', w.email, subject, body);
+    const info = run('INSERT INTO notifications (salon_id, kind, channel, recipient, subject, body) VALUES (?,?,?,?,?,?)', salonId, 'waitlist', 'email', w.email, subject, body);
     run('UPDATE waitlist SET notified = 1 WHERE id = ?', w.id);
-    deliver({ kind: 'waitlist', channel: 'email', to: w.email, subject, body, salon_id: salonId });
+    deliver(info.lastInsertRowid, { kind: 'waitlist', channel: 'email', to: w.email, subject, body, salon_id: salonId, fromName: salon.name });
   }
 }
 
