@@ -6,7 +6,11 @@ Lumea est une plateforme complète pour les **salons de coiffure, barbiers, inst
 - **un site internet propre à chaque salon** (`/s/<slug>` ou son propre domaine), avec **10 modèles** et un éditeur visuel ;
 - une **page de réservation par salon**, intégrable sur n'importe quel site (widget iframe) ;
 - un **back-office pro** : agenda multi-collaborateurs, CRM, prestations, équipe, avis, automatisations, statistiques, abonnement ;
-- une **console d'administration** de la plateforme (MRR, salons, formules, visibilité).
+- une **console d'administration** de la plateforme (MRR, salons, formules, visibilité) ;
+- un **assistant IA** qui répond au téléphone quand personne ne décroche et au chat du site ;
+- la **boîte mail triée**, la **comptabilité** (factures, dépenses, TVA) et le **point du matin**.
+
+Quatre espaces, chacun avec son compte : **administrateur** (`/admin`, mot de passe `ADMIN_PASSWORD`), **établissement** (`/app`), **collaborateurs** salariés ou indépendants (`/app`, accès limité à leur agenda et leurs gains) et **clients** (`/compte`, inscription par e-mail, Google ou Apple).
 
 Positionnement : faire mieux que les acteurs du marché (Salonkee, Planity, Treatwell, Fresha) sur les points qui font mal aux salons.
 
@@ -53,6 +57,20 @@ Dans l'espace pro, **Mon site** permet de : choisir et prévisualiser tous les m
 | **Anniversaire** | *Paramètres* | Message avec l'offre du salon le jour J (date demandée, facultative, à la réservation). |
 | **Petites attentions** | Partout | « Dispo aujourd'hui à 14h30 » sur la marketplace, « Reprendre ce rendez-vous » en un clic, confettis à la confirmation. |
 
+## Tout centralisé : un seul abonnement au lieu de quatre
+
+| Fonction | Où | Détail |
+| --- | --- | --- |
+| **Standard téléphonique IA** | *Assistant IA* | Le numéro du salon (Twilio) fait sonner le salon ; sans réponse après N secondes, l'assistant décroche, **se présente comme une IA**, consulte l'agenda réel, réserve (« c'est noté ») ou propose les créneaux les plus proches, déplace ou annule. Jamais dans le passé ni à moins de 45 min (réglable, minimum 15 min) : règles appliquées dans le code. Sinon il prend un message, transmis au salon. Simulateur intégré. |
+| **Chat du site** | Site du salon + page de réservation | Réponses par l'IA, ou par l'équipe : dès qu'un membre répond dans *Messages*, l'IA se retire. Sans clé IA, le chat arrive directement à l'équipe. |
+| **Messages** | *Messages* | Appels, chats et formulaires de contact au même endroit, avec « à traiter » et résultat (RDV pris, message…). |
+| **E-mails** | *E-mails* | Connexion Gmail / Outlook en lecture seule ; chaque e-mail est classé (clients, factures, fournisseurs, administration, pub), résumé en une phrase avec l'action à faire. La pub disparaît, une facture reçue devient une dépense en un clic. |
+| **Comptabilité** | *Comptabilité* | Factures numérotées (TVA 8.1 %, IBAN, PDF, envoi par e-mail, depuis la caisse), dépenses, résultat mois par mois (part des indépendants et loyers de fauteuil, commissions), TVA collectée / déductible / due, export pour la fiduciaire. |
+| **Point du matin** | E-mail + tableau de bord | « Aujourd'hui vous avez 6 clients » : qui, quoi, avec qui, coupe choisie en 3D, notes, nouveaux clients, anniversaires, appels à rappeler, e-mails urgents, factures en retard, stock bas. Chaque collaborateur reçoit sa propre journée. |
+| **Rémunérations** | *Rémunérations* | Salarié, pourcentage ou location de fauteuil (indépendant) : calcul automatique de ce qui revient à chacun. |
+
+L'IA utilise Claude (`server/ai.js`, modèle `claude-opus-5-5`, variable `ANTHROPIC_API_KEY`). Le repli automatique côté serveur est activé : si une demande est refusée par le modèle principal, l'API la reprend avec un autre modèle adapté dans le même appel.
+
 ## Démarrage rapide
 
 Prérequis : **Node.js 22.13 ou plus** (SQLite est intégré à Node, aucune base externe).
@@ -95,6 +113,8 @@ npm test             # tests d'intégration (20 scénarios, dont paiements Strip
 | `/app` | Back-office pro |
 | `/admin` | Console d'administration : revenus (abonnements + modèles), salons, formules, sites, demandes de design sur mesure |
 | `/mentions` | Mentions légales, CGU, RGPD (modèle à compléter) |
+| `/facture/<token>` | Facture imprimable / PDF partagée avec le client |
+| `/api/voice/incoming` | Webhook Twilio de l'assistant téléphonique |
 
 ## Fonctionnalités détaillées
 
