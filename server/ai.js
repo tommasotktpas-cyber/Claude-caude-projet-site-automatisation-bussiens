@@ -22,13 +22,13 @@ function setClient(fake) { injected = fake; }
  * One Messages API call. Refusal fallbacks are enabled server-side ("default" routing),
  * so a declined request is retried on a suitable model within the same call.
  */
-function createMessage({ system, messages, tools, effort = 'low', maxTokens = 2000 }) {
+function createMessage({ system, messages, tools, effort = 'low', maxTokens = 2000, format }) {
   return getClient().beta.messages.create({
     model: MODEL,
     max_tokens: maxTokens,
     betas: ['server-side-fallback-2026-07-01'],
     fallbacks: 'default',
-    output_config: { effort },
+    output_config: { effort, ...(format ? { format } : {}) },
     system,
     messages,
     ...(tools ? { tools } : {}),
@@ -42,4 +42,12 @@ async function complete({ system, prompt, effort = 'low', maxTokens = 2000 }) {
   return res.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
 }
 
-module.exports = { enabled, createMessage, complete, setClient, MODEL, Anthropic };
+/** Structured answer validated by the API against a JSON schema (null on refusal). */
+async function json({ system, prompt, schema, effort = 'low', maxTokens = 4000 }) {
+  const res = await createMessage({ system, messages: [{ role: 'user', content: prompt }], effort, maxTokens, format: { type: 'json_schema', schema } });
+  if (res.stop_reason === 'refusal' || res.stop_reason === 'max_tokens') return null;
+  const text = res.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+module.exports = { enabled, createMessage, complete, json, setClient, MODEL, Anthropic };

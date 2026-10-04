@@ -78,6 +78,16 @@ function createApp() {
   app.use('/api/pro', require('./routes/pro'));
   app.use('/api/admin', require('./routes/admin'));
   app.use('/api/voice', require('./voice').router());
+  // Gmail / Outlook connection: the provider sends the owner back here (top-level navigation, session cookie present).
+  app.get('/api/mail/callback/:provider', async (req, res) => {
+    try {
+      await require('./mail').handleCallback(req.params.provider, req.query, req.user);
+      res.redirect('/app?mail=ok#emails');
+    } catch (err) {
+      if (!err.status) console.error('[mail callback]', err);
+      res.redirect(`/app?mail_error=${encodeURIComponent(err.status ? err.message : 'Connexion impossible, réessayez.')}#emails`);
+    }
+  });
   app.get('/api/plans', (_req, res) => {
     const { PLANS, TEMPLATE_PRICING } = require('./plans');
     const extra = require('./plans');
@@ -133,6 +143,7 @@ if (require.main === module) {
   setInterval(() => {
     try { runAutomations(); } catch (err) { console.error('[automations]', err); }
   }, 60 * 1000).unref();
+  setInterval(() => require('./mail').syncAll().catch((err) => console.error('[mail]', err)), 10 * 60 * 1000).unref();
 }
 
 module.exports = { createApp, ensureAdmin };

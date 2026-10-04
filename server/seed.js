@@ -188,6 +188,18 @@ function seed() {
           ['client', 'Après dix-sept heures. Sophie Keller.'],
           ['assistant', 'C’est noté, Sophie : l’équipe vous rappelle après dix-sept heures. Belle journée !'],
         ]);
+        // A demo mailbox, already sorted (status 'demo': never synced).
+        const acc = Number(run("INSERT INTO mail_accounts (salon_id, provider, email, refresh_token, status) VALUES (?, 'gmail', 'contact@maison-celeste.ch', '-', 'demo')", salon.id).lastInsertRowid);
+        [
+          ['Léa Rossi', 'lea.rossi@gmail.com', 'Mon rendez-vous de jeudi', 'Bonjour, est-ce possible de décaler mon rendez-vous de jeudi à samedi matin ?', 'client', 'haute', 'Léa Rossi souhaite décaler son RDV de jeudi à samedi matin.', 'Proposer un créneau samedi', 50],
+          ['L’Oréal Professionnel', 'factures@loreal-pro.ch', 'Rappel : facture F-2210', 'Votre facture F-2210 de 1 284.60 CHF arrive à échéance le 15.10.', 'facture', 'haute', 'Facture L’Oréal de 1 284.60 CHF, échéance le 15.10.', 'Payer avant le 15.10', 180],
+          ['Beauty Supply SA', 'shop@beautysupply.ch', 'Commande 553 expédiée', 'Votre commande 553 (shampoings, 12 colorations) a été expédiée.', 'fournisseur', 'normale', 'La commande 553 est en route, livraison prévue demain.', '', 400],
+          ['Caisse AVS Genève', 'info@ocas.ch', 'Décompte annuel', 'Veuillez trouver votre décompte de cotisations 2026.', 'administration', 'normale', 'Décompte AVS 2026 disponible.', 'Transmettre à la fiduciaire', 900],
+          ['Promo Coiffure', 'news@promocoiffure.ch', '-40 % ce week-end', 'Profitez de -40 % sur toute la gamme. Se désabonner.', 'promo', 'basse', 'Publicité.', '', 1000],
+        ].forEach(([fn, fe, subj, snip, cat, prio, sum, action, ago], i) => run(
+          `INSERT INTO mail_messages (salon_id, account_id, provider_id, from_name, from_email, subject, snippet, received_at, category, priority, summary, action, done)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, salon.id, acc, `demo-${i}`, fn, fe, subj, snip, T.addMinutes(T.now().iso, -ago), cat, prio, sum, action, cat === 'promo' ? 1 : 0,
+        ));
         conv('chat', 'demo-chat-1', 'Visiteur du site', '', 'to_handle', 'Message : Est-ce que vous faites les tresses africaines ?', [
           ['client', 'Bonjour, est-ce que vous faites les tresses africaines ?'],
           ['assistant', 'Bonjour ! Les tresses ne figurent pas dans nos prestations en ligne. Je transmets votre question à l’équipe, qui vous répondra ici même.'],

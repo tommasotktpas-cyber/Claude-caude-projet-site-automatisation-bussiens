@@ -1040,4 +1040,52 @@ router.patch('/conversations/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- E-mails (Gmail / Outlook, read-only) ----------
+
+router.get('/mail', (req, res) => {
+  const mail = require('../mail');
+  const cat = mail.CATEGORIES.includes(req.query.category) ? req.query.category : null;
+  const showDone = req.query.done === '1';
+  const messages = all(
+    `SELECT m.*, a.email AS account_email FROM mail_messages m JOIN mail_accounts a ON a.id = m.account_id
+     WHERE m.salon_id = ? ${cat ? 'AND m.category = ?' : ''} ${showDone ? '' : 'AND m.done = 0'}
+     ORDER BY CASE m.priority WHEN 'haute' THEN 0 WHEN 'normale' THEN 1 ELSE 2 END, m.received_at DESC LIMIT 150`,
+    ...(cat ? [req.salon.id, cat] : [req.salon.id]),
+  );
+  res.json({
+    providers: mail.enabledProviders(),
+    ai: require('../ai').enabled(),
+    accounts: all('SELECT id, provider, email, last_sync_at, status, error FROM mail_accounts WHERE salon_id = ? ORDER BY id', req.salon.id),
+    counts: all("SELECT category, COUNT(*) AS n FROM mail_messages WHERE salon_id = ? AND done = 0 AND category != '' GROUP BY category", req.salon.id),
+    messages,
+  });
+});
+
+router.get('/mail/connect/:provider', (req, res) => {
+  res.json({ url: require('../mail').authorizeUrl(req.params.provider, { salonId: req.salon.id, userId: req.user.id }) });
+});
+
+router.post('/mail/sync', async (req, res) => {
+  res.json({ added: await require('../mail').syncSalon(req.salon.id) });
+});
+
+router.post('/mail/digest', async (req, res) => {
+  res.json({ text: await require('../mail').digest(req.salon) });
+});
+
+router.patch('/mail/messages/:id', (req, res) => {
+  const m = one('SELECT id FROM mail_messages WHERE id = ? AND salon_id = ?', Number(req.params.id), req.salon.id);
+  if (!m) throw new HttpError(404, 'E-mail introuvable.');
+  const cat = require('../mail').CATEGORIES.includes(req.body?.category) ? req.body.category : null;
+  run('UPDATE mail_messages SET done = COALESCE(?, done), category = COALESCE(?, category) WHERE id = ?',
+    req.body?.done === undefined ? null : (req.body.done ? 1 : 0), cat, m.id);
+  res.json({ ok: true });
+});
+
+router.delete('/mail/accounts/:id', (req, res) => {
+  const r = run('DELETE FROM mail_accounts WHERE id = ? AND salon_id = ?', Number(req.params.id), req.salon.id);
+  if (!r.changes) throw new HttpError(404, 'Compte introuvable.');
+  res.json({ ok: true });
+});
+
 module.exports = router;

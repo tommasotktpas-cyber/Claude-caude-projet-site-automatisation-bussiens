@@ -423,6 +423,44 @@ CREATE INDEX IF NOT EXISTS idx_ai_conv_salon ON ai_conversations (salon_id, upda
 addColumn('ai_conversations', 'human_mode', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('ai_conversations', 'unread', 'INTEGER NOT NULL DEFAULT 0');
 
+// Connected mailboxes (Gmail / Outlook): read-only, tokens encrypted at rest.
+db.exec(`
+CREATE TABLE IF NOT EXISTS mail_accounts (
+  id INTEGER PRIMARY KEY,
+  salon_id INTEGER NOT NULL REFERENCES salons(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL CHECK (provider IN ('gmail','outlook')),
+  email TEXT NOT NULL,
+  refresh_token TEXT NOT NULL,
+  access_token TEXT NOT NULL DEFAULT '',
+  expires_at INTEGER NOT NULL DEFAULT 0,
+  last_sync_at TEXT,
+  status TEXT NOT NULL DEFAULT 'ok',
+  error TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (salon_id, provider, email)
+);
+CREATE TABLE IF NOT EXISTS mail_messages (
+  id INTEGER PRIMARY KEY,
+  salon_id INTEGER NOT NULL REFERENCES salons(id) ON DELETE CASCADE,
+  account_id INTEGER NOT NULL REFERENCES mail_accounts(id) ON DELETE CASCADE,
+  provider_id TEXT NOT NULL,
+  thread_id TEXT NOT NULL DEFAULT '',
+  from_name TEXT NOT NULL DEFAULT '',
+  from_email TEXT NOT NULL DEFAULT '',
+  subject TEXT NOT NULL DEFAULT '',
+  snippet TEXT NOT NULL DEFAULT '',
+  received_at TEXT NOT NULL,
+  web_link TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT '',
+  priority TEXT NOT NULL DEFAULT 'normale',
+  summary TEXT NOT NULL DEFAULT '',
+  action TEXT NOT NULL DEFAULT '',
+  done INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (account_id, provider_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mail_salon ON mail_messages (salon_id, received_at);
+`);
+
 db.exec(`CREATE TABLE IF NOT EXISTS stripe_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
 
 /** Runs fn inside an IMMEDIATE transaction (serialises writers — prevents double booking). Re-entrant. */

@@ -1586,11 +1586,78 @@ async function renderAssistant() {
 }
 
 // =====================================================================
+// E-mails (Gmail / Outlook, sorted and summarised)
+// =====================================================================
+const mailState = { category: '', done: false };
+const MAIL_CAT = { client: ['Clients', 'badge-brand'], facture: ['Factures', 'badge-warn'], fournisseur: ['Fournisseurs', ''], administration: ['Administration', ''], autre: ['Autres', ''], promo: ['Publicités', ''] };
+const PRIO = { haute: '<span class="badge badge-danger">Urgent</span>', normale: '', basse: '' };
+
+async function renderEmails() {
+  const q = new URLSearchParams();
+  if (mailState.category) q.set('category', mailState.category);
+  if (mailState.done) q.set('done', '1');
+  const d = await api(P(`/mail?${q}`));
+  const count = (c) => d.counts.find((x) => x.category === c)?.n || 0;
+  const connectBtns = d.providers.map((p) => `<button class="btn btn-ghost btn-sm" data-connect="${p.id}" ${p.enabled ? '' : 'disabled title="À configurer sur le serveur"'}>Connecter ${esc(p.name)}</button>`).join(' ');
+  view.innerHTML = `${head('E-mails', d.accounts.length ? '<button class="btn btn-ghost" id="mail-sync">Actualiser</button> <button class="btn btn-brand" id="mail-digest">Résumé IA</button>' : '')}
+    ${d.accounts.length ? '' : `<div class="card center" style="padding:36px">
+      <h3>Toute votre boîte mail, triée pour vous</h3>
+      <p class="muted" style="max-width:560px;margin:0 auto 16px">Connectez Gmail ou Outlook : chaque e-mail est classé (clients, factures, fournisseurs, administration, publicité), résumé en une phrase avec l’action à faire. Les publicités disparaissent. Accès en lecture seule.</p>
+      ${connectBtns}</div>`}
+    ${d.accounts.length ? `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      ${d.accounts.map((a) => `<span class="badge ${a.status === 'ok' || a.status === 'demo' ? 'badge-ok' : 'badge-warn'}" title="${esc(a.error)}">${esc(a.email)}${a.status === 'reconnect' ? ' · à reconnecter' : ''} <button class="link small" data-unlink="${a.id}" aria-label="Déconnecter" style="margin-left:4px">✕</button></span>`).join('')}
+      <span class="grow"></span>${connectBtns}</div>
+      <div class="card note-box" id="mail-brief" style="white-space:pre-line" hidden></div>
+      <div class="row" style="gap:6px;flex-wrap:wrap;margin:14px 0">
+        <button class="btn btn-sm ${!mailState.category ? 'btn-brand' : 'btn-ghost'}" data-cat="">Tout</button>
+        ${Object.entries(MAIL_CAT).filter(([k]) => k !== 'promo').map(([k, [l]]) => `<button class="btn btn-sm ${mailState.category === k ? 'btn-brand' : 'btn-ghost'}" data-cat="${k}">${l} (${count(k)})</button>`).join('')}
+        <span class="grow"></span><label class="check small"><input type="checkbox" id="mail-done" ${mailState.done ? 'checked' : ''}> Afficher les traités</label>
+      </div>
+      <div class="card" style="padding:4px 18px">${d.messages.map((m) => `
+        <div class="list-item" style="align-items:flex-start">
+          <div class="grow" style="min-width:0">
+            <div class="row" style="gap:6px;flex-wrap:wrap"><b>${esc(m.from_name || m.from_email)}</b>${PRIO[m.priority] || ''}<span class="badge ${MAIL_CAT[m.category]?.[1] || ''}">${MAIL_CAT[m.category]?.[0] || 'Non trié'}</span><span class="small muted">${esc(m.received_at.replace('T', ' '))}</span></div>
+            <div style="margin-top:4px">${esc(m.summary || m.subject)}</div>
+            <div class="small muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.subject)} — ${esc(m.snippet)}</div>
+            ${m.action ? `<div class="small" style="margin-top:4px"><b>À faire :</b> ${esc(m.action)}</div>` : ''}
+          </div>
+          <div class="row" style="gap:6px;flex-wrap:nowrap">${m.web_link ? `<a class="btn btn-ghost btn-sm" href="${esc(m.web_link)}" target="_blank" rel="noopener">Ouvrir</a>` : ''}
+            <button class="btn btn-ghost btn-sm" data-done="${m.id}" data-val="${m.done ? 0 : 1}">${m.done ? 'Rouvrir' : 'Traité'}</button></div>
+        </div>`).join('') || '<div class="empty">Rien en attente. 🎉</div>'}</div>` : ''}`;
+  view.querySelectorAll('[data-connect]').forEach((b) => {
+    b.onclick = async () => { try { location.href = (await api(P(`/mail/connect/${b.dataset.connect}`))).url; } catch (err) { toast(err.message, 'error'); } };
+  });
+  view.querySelectorAll('[data-cat]').forEach((b) => { b.onclick = () => { mailState.category = b.dataset.cat; renderEmails(); }; });
+  view.querySelectorAll('[data-done]').forEach((b) => { b.onclick = async () => { await api(P(`/mail/messages/${b.dataset.done}`), { method: 'PATCH', body: { done: b.dataset.val === '1' } }); renderEmails(); }; });
+  view.querySelectorAll('[data-unlink]').forEach((b) => {
+    b.onclick = () => modal({
+      title: 'Déconnecter cette boîte mail ?', body: '<p>Les e-mails importés seront supprimés de Lumea (rien n’est supprimé dans votre messagerie).</p>',
+      actions: [{ id: 'close', label: 'Annuler', cls: 'btn-ghost' }, { id: 'ok', label: 'Déconnecter', cls: 'btn-danger', handler: async () => { await api(P(`/mail/accounts/${b.dataset.unlink}`), { method: 'DELETE' }); renderEmails(); } }],
+    });
+  });
+  if ($('#mail-done')) $('#mail-done').onchange = (e) => { mailState.done = e.target.checked; renderEmails(); };
+  if ($('#mail-sync')) {
+    $('#mail-sync').onclick = async (e) => {
+      e.target.disabled = true;
+      try { const r = await api(P('/mail/sync'), { method: 'POST', body: {} }); toast(`${r.added} nouvel(s) e-mail(s).`); renderEmails(); } catch (err) { toast(err.message, 'error'); e.target.disabled = false; }
+    };
+    $('#mail-digest').onclick = async (e) => {
+      e.target.disabled = true;
+      const box = $('#mail-brief');
+      box.hidden = false;
+      box.textContent = 'Lecture de vos e-mails…';
+      try { box.textContent = (await api(P('/mail/digest'), { method: 'POST', body: {} })).text; } catch (err) { box.textContent = err.message; }
+      e.target.disabled = false;
+    };
+  }
+}
+
+// =====================================================================
 // Router
 // =====================================================================
 const ROUTES = {
   dashboard: renderDashboard, agenda: renderAgenda, clients: () => renderClients(), services: renderServices,
-  team: renderTeam, reviews: renderReviews, automations: renderAutomations, settings: renderSettings, billing: renderBilling, site: renderSiteEditor, caisse: renderTill, stock: renderStock, messages: renderMessages, assistant: renderAssistant, gains: renderEarnings, planning: renderMyPlanning,
+  team: renderTeam, reviews: renderReviews, automations: renderAutomations, settings: renderSettings, billing: renderBilling, site: renderSiteEditor, caisse: renderTill, stock: renderStock, messages: renderMessages, assistant: renderAssistant, emails: renderEmails, gains: renderEarnings, planning: renderMyPlanning,
 };
 
 async function route() {
@@ -1634,4 +1701,9 @@ async function route() {
   route();
   updateMsgCount();
   setInterval(updateMsgCount, 60000);
+  // Back from the Gmail / Outlook consent screen.
+  const qs = new URLSearchParams(location.search);
+  if (qs.get('mail') === 'ok') toast('Boîte mail connectée.');
+  if (qs.get('mail_error')) toast(qs.get('mail_error'), 'error');
+  if (qs.has('mail') || qs.has('mail_error')) history.replaceState(null, '', `/app${adminSalon ? `?salon=${adminSalon}` : ''}${location.hash}`);
 })();
