@@ -869,12 +869,23 @@ async function renderSettings() {
 // =====================================================================
 async function renderBilling() {
   await refreshCtx();
+  api(P('/referral')).then((r) => {
+    const card = $('#referral-card');
+    if (!card) return;
+    card.innerHTML = `<div class="row between" style="align-items:flex-start;gap:16px"><div style="flex:1;min-width:260px"><h3 style="margin:0 0 4px">Parrainez un salon : 1 mois offert</h3>
+      <p class="small" style="margin:0 0 10px">Le salon que vous recommandez reçoit <b>60 jours d’essai</b> au lieu de 30. Dès qu’il s’abonne, <b>votre prochain mois est offert</b>. Sans limite.</p>
+      <div class="row" style="flex-wrap:nowrap;gap:6px"><input readonly id="ref-link" value="${esc(r.link)}"><button class="btn btn-brand btn-sm" id="ref-copy">Copier</button>
+      <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(`J’utilise Lumea pour mon salon (agenda, réservation en ligne, assistant IA, 0 % de commission). Avec mon lien tu as 60 jours gratuits : ${r.link}`)}">WhatsApp</a></div></div>
+      <div class="center" style="min-width:150px"><div class="display" style="font-size:2.2rem">${r.rewarded}</div><div class="small muted">mois gagnés · ${r.referred.length} salon(s) parrainé(s)</div></div></div>`;
+    $('#ref-copy').onclick = async () => { try { await navigator.clipboard.writeText(r.link); toast('Lien copié.'); } catch { $('#ref-link').select(); } };
+  }).catch(() => {});
   const { plans } = ctx.salonFull;
   const s = ctx.salon;
   view.innerHTML = `${head('Abonnement')}
     <div class="card" style="margin-bottom:18px"><div class="row between">
       <div>Formule actuelle : <b>${s.plan === 'trial' ? 'Essai gratuit' : esc(plans.find((p) => p.id === s.plan)?.name)}</b>${s.plan === 'trial' ? ` · jusqu’au ${fmt.date(s.trial_ends_at, { day: 'numeric', month: 'long', year: 'numeric' })}` : ''}</div>
       <span class="badge badge-ok">0 % de commission, toujours</span></div></div>
+    <div class="card" id="referral-card" style="margin-bottom:18px;background:var(--brand-soft);border-color:transparent"><b>Parrainez un salon : 1 mois offert</b> <span class="small muted">Chargement…</span></div>
     <div class="pricing">${plans.map((p) => `
       <div class="card pad-lg plan ${p.id === s.plan ? 'popular' : ''}">
         ${p.id === s.plan ? '<span class="ribbon">Votre formule</span>' : p.popular ? '<span class="ribbon" style="background:var(--ink)">Recommandé</span>' : ''}

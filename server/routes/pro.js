@@ -177,6 +177,11 @@ router.delete('/boost', (req, res) => {
 });
 
 // Stripe customer portal: card, invoices, cancellation — handled by Stripe.
+router.get('/referral', (req, res) => {
+  const st = require('../referrals').stats(one('SELECT * FROM salons WHERE id = ?', req.salon.id));
+  res.json({ ...st, link: `${APP_URL}/pro?ref=${st.code}` });
+});
+
 router.post('/billing/portal', async (req, res) => {
   if (!payments.enabled() || !req.salon.stripe_customer_id) throw new HttpError(400, 'Aucun abonnement payant à gérer pour le moment.');
   const session = await payments.stripe('POST', '/billing_portal/sessions', { customer: req.salon.stripe_customer_id, return_url: `${APP_URL}/app#billing` });

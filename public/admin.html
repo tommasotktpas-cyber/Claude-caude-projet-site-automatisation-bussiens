@@ -50,7 +50,7 @@
           <thead><tr><th>Salon</th><th>Propriétaire</th><th>Site</th><th>RDV</th><th>Formule</th><th>Visible</th><th></th></tr></thead>
           <tbody>${d.salons.map((s) => `
             <tr><td><b>${esc(s.name)}</b><div class="small muted">${esc(CATEGORY_LABELS[s.category] || s.category)} · ${esc(s.city)}</div></td>
-              <td class="small">${esc(s.owner_email)}</td>
+              <td class="small">${esc(s.owner_email)}${s.referred_by_name ? `<div class="muted">parrainé par ${esc(s.referred_by_name)}</div>` : ''}${s.referral_credit_months ? `<div><span class="badge badge-warn">${s.referral_credit_months} mois offert(s) à appliquer</span> <button class="link small" data-credit="${s.id}">Appliqué</button></div>` : ''}</td>
               <td class="small"><a href="/s/${encodeURIComponent(s.slug)}" target="_blank">${esc(s.template || 'classique')}</a>${s.boost_until >= new Date().toISOString().slice(0, 10) ? ' <span class="badge badge-brand">Sponsorisé</span>' : ''}${s.licenses ? ` <span class="badge">${s.licenses} licence</span>` : ''}${s.custom_domain ? `<div class="muted">${esc(s.custom_domain)}</div>` : ''}</td>
               <td>${n(s.bookings)}</td>
               <td><select data-plan="${s.id}" style="width:auto;padding:6px 8px">${Object.entries(PLAN_LABEL).map(([v, l]) => `<option value="${v}" ${v === s.plan ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
@@ -58,6 +58,7 @@
               <td style="white-space:nowrap"><a class="btn btn-ghost btn-sm" href="/s/${encodeURIComponent(s.slug)}" target="_blank">Site</a> <a class="btn btn-ghost btn-sm" href="/app?salon=${s.id}">Back-office</a></td></tr>`).join('')}
           </tbody></table></div>`;
       $$('[data-plan]').forEach((el) => { el.onchange = () => api(`/api/admin/salons/${el.dataset.plan}`, { method: 'PATCH', body: { plan: el.value } }).then(() => { toast('Formule mise à jour.'); load(); }); });
+      $$('[data-credit]').forEach((el) => { el.onclick = () => api(`/api/admin/salons/${el.dataset.credit}`, { method: 'PATCH', body: { referral_credit_months: 0 } }).then(() => { toast('Crédit soldé.'); load(); }); });
       $$('[data-pub]').forEach((el) => { el.onchange = () => api(`/api/admin/salons/${el.dataset.pub}`, { method: 'PATCH', body: { published: el.checked } }).then(() => toast('Visibilité mise à jour.')); });
       $$('[data-req]').forEach((el) => { el.onchange = () => api(`/api/admin/design-requests/${el.dataset.req}`, { method: 'PATCH', body: { status: el.value } }).then(() => toast('Statut mis à jour.')); });
       $$('[data-note]').forEach((el) => { el.onchange = () => api(`/api/admin/design-requests/${el.dataset.note}`, { method: 'PATCH', body: { admin_note: el.value } }).then(() => toast('Note enregistrée.')); });

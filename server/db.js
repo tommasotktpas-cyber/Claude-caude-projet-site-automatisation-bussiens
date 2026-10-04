@@ -430,6 +430,11 @@ addColumn('salons', 'winback_days', 'INTEGER NOT NULL DEFAULT 90');
 addColumn('salons', 'winback_offer', "TEXT NOT NULL DEFAULT '-10 % sur votre prochaine visite'");
 addColumn('salons', 'winback_enabled', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('clients', 'winback_sent_at', "TEXT NOT NULL DEFAULT ''");
+// Salon-to-salon referral: one free month for the referrer when the referred salon starts paying.
+addColumn('salons', 'referral_code', "TEXT NOT NULL DEFAULT ''");
+addColumn('salons', 'referred_by', 'INTEGER');
+addColumn('salons', 'referral_rewarded', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('salons', 'referral_credit_months', 'INTEGER NOT NULL DEFAULT 0');
 // Morning briefing e-mail.
 addColumn('salons', 'daily_report_enabled', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('salons', 'daily_report_hour', 'INTEGER NOT NULL DEFAULT 7');

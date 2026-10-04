@@ -14,7 +14,8 @@ router.get('/overview', (_req, res) => {
     `SELECT s.id, s.name, s.slug, s.city, s.category, s.plan, s.trial_ends_at, s.published, s.created_at, u.email AS owner_email,
             (SELECT COUNT(*) FROM bookings b WHERE b.salon_id = s.id) AS bookings,
             (SELECT COUNT(*) FROM staff st WHERE st.salon_id = s.id AND st.active = 1) AS staff,
-            x.template, x.published AS site_published, x.custom_domain, s.boost_until,
+            x.template, x.published AS site_published, x.custom_domain, s.boost_until, s.referral_credit_months,
+            (SELECT r.name FROM salons r WHERE r.id = s.referred_by) AS referred_by_name,
             (SELECT COUNT(*) FROM template_licenses l WHERE l.salon_id = s.id AND l.active = 1) AS licenses
      FROM salons s LEFT JOIN sites x ON x.salon_id = s.id JOIN users u ON u.id = s.owner_id ORDER BY s.created_at DESC`,
   );
@@ -60,7 +61,8 @@ router.get('/overview', (_req, res) => {
 router.patch('/salons/:id', (req, res) => {
   const s = one('SELECT * FROM salons WHERE id = ?', Number(req.params.id));
   if (!s) throw new HttpError(404, 'Salon introuvable.');
-  const { plan, published } = req.body || {};
+  const { plan, published, referral_credit_months: credit } = req.body || {};
+  if (credit !== undefined) run('UPDATE salons SET referral_credit_months = ? WHERE id = ?', Math.max(0, Number.parseInt(credit, 10) || 0), s.id);
   if (plan !== undefined && !['trial', ...PLANS.map((p) => p.id)].includes(plan)) throw new HttpError(400, 'Formule inconnue.');
   run('UPDATE salons SET plan = ?, published = ? WHERE id = ?', plan ?? s.plan, published === undefined ? s.published : (published ? 1 : 0), s.id);
   res.json({ ok: true });

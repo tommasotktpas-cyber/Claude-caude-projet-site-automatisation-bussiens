@@ -46,10 +46,11 @@ router.post('/register-pro', limiter, (req, res) => {
   if (salonName.length < 2) throw new HttpError(400, 'Merci d’indiquer le nom de votre établissement.');
   const id = tx(() => {
     const uid = createUser({ email, password, name, phone: clean(req.body.phone, 40), role: 'pro' });
-    createSalon(uid, {
+    const salon = createSalon(uid, {
       name: salonName, owner_name: name, category: req.body.category, city: clean(req.body.city, 80),
       email, phone: clean(req.body.phone, 40),
     });
+    if (req.body.ref) require('../referrals').attach(salon.id, req.body.ref);
     return uid;
   });
   setSession(res, id);

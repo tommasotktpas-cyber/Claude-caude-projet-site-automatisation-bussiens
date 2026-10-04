@@ -86,7 +86,9 @@
       const btn = e.target.querySelector('button[type="submit"], button:not([type])');
       btn.disabled = true;
       try {
-        const res = await api(url, { method: 'POST', body: formData(e.target) });
+        const body = formData(e.target);
+        if (url.endsWith('register-pro')) { try { body.ref = localStorage.getItem('lumea_ref') || undefined; } catch { /* private mode */ } }
+        const res = await api(url, { method: 'POST', body });
         redirect(res.role);
       } catch (err) {
         toast(err.message, 'error');

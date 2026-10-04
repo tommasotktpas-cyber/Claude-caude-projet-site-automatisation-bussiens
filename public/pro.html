@@ -155,6 +155,12 @@
     'use strict';
     $$('[data-icon]').forEach((el) => { el.innerHTML = ICONS[el.dataset.icon]; });
     mountChrome();
+    // Referral link (/pro?ref=CODE): remembered until the salon signs up, and announced.
+    const ref = new URLSearchParams(location.search).get('ref');
+    if (ref && /^[A-Z0-9]{4,20}$/i.test(ref)) {
+      try { localStorage.setItem('lumea_ref', ref.toUpperCase()); } catch { /* private mode */ }
+      toast('Vous êtes parrainé : 60 jours d’essai gratuit au lieu de 30.');
+    }
     if (matchMedia('(max-width: 900px)').matches) $('#hero-grid').style.gridTemplateColumns = '1fr';
 
     api('/api/plans').then(({ plans, template_pricing: tp, currency }) => {

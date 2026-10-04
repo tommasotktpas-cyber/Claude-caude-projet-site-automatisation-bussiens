@@ -32,6 +32,7 @@ function activatePlan(salonId, plan, { customerId, subscriptionId } = {}) {
   if (previous && subscriptionId && previous !== subscriptionId && payments.enabled()) {
     payments.cancelSubscription(previous, { atPeriodEnd: false }).catch((err) => console.error('[billing] cancel old plan:', err.message));
   }
+  require('./referrals').rewardIfDue(salonId).catch((err) => console.error('[referral]', err.message));
 }
 
 function addLicense(salonId, template, billing, { subscriptionId } = {}) {
