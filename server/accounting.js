@@ -83,6 +83,8 @@ const dmy = (d) => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}` : 
 /** Printable invoice (A4). "Imprimer / PDF" uses the browser's print dialog. */
 function renderInvoice(inv) {
   const s = one('SELECT * FROM salons WHERE id = ?', inv.salon_id);
+  const qrbill = require('./qrbill');
+  const qr = qrbill.paymentPart(inv, s, CURRENCY);
   const items = JSON.parse(inv.items);
   const status = { issued: '', paid: `<div class="stamp">Payée${inv.paid_on ? ` le ${dmy(inv.paid_on)}` : ''}</div>`, cancelled: '<div class="stamp void">Annulée</div>' }[inv.status];
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -96,6 +98,8 @@ td.n,th.n{text-align:right;white-space:nowrap}.tot td{border:0;padding:4px 8px}.
 .brand{font-size:20px;font-weight:700;color:${/^#[0-9a-f]{6}$/i.test(s.accent) ? s.accent : '#6d28d9'}}.box{background:#faf8f5;border-radius:10px;padding:14px 16px;margin-top:20px}
 .stamp{position:absolute;top:42px;right:52px;border:3px solid #15803d;color:#15803d;font-weight:800;text-transform:uppercase;padding:6px 14px;border-radius:8px;transform:rotate(-6deg)}.stamp.void{border-color:#be123c;color:#be123c}
 .actions{max-width:800px;margin:0 auto 14px;text-align:right}.actions button{font:inherit;font-weight:600;border:0;background:#18151f;color:#fff;padding:10px 18px;border-radius:10px;cursor:pointer}
+${qrbill.CSS}
+.qr-wrap{max-width:800px;margin:0 auto;overflow:hidden}
 @media print{body{background:#fff;padding:0}.page{box-shadow:none;border-radius:0;padding:0}.actions{display:none}}
 @media (max-width:600px){.page{padding:28px 20px}.stamp{position:static;display:inline-block;margin-bottom:12px}}
 </style></head><body>
@@ -113,9 +117,9 @@ td.n,th.n{text-align:right;white-space:nowrap}.tot td{border:0;padding:4px 8px}.
     <tr class="grand"><td>Total ${CURRENCY}</td><td class="n">${money(inv.total_cents)}</td></tr></table>
   ${!inv.vat_rate_bp ? '<p class="muted" style="font-size:12px">Entreprise non assujettie à la TVA.</p>' : ''}
   ${inv.note ? `<p>${esc(inv.note)}</p>` : ''}
-  ${inv.status === 'issued' && s.iban ? `<div class="box"><b>Paiement</b> d’ici au ${dmy(inv.due_on)} sur le compte<br>IBAN <b>${esc(s.iban)}</b> · ${esc(s.legal_name || s.name)}<br>Référence : facture ${esc(inv.number)}</div>` : ''}
+  ${inv.status === 'issued' && s.iban && !qr ? `<div class="box"><b>Paiement</b> d’ici au ${dmy(inv.due_on)} sur le compte<br>IBAN <b>${esc(s.iban)}</b> · ${esc(s.legal_name || s.name)}<br>Référence : facture ${esc(inv.number)}</div>` : ''}
   ${s.invoice_footer ? `<p class="muted" style="font-size:12px;margin-top:28px">${esc(s.invoice_footer)}</p>` : ''}
-</div></body></html>`;
+</div>${qr ? `<div class="qr-wrap">${qr}</div>` : ''}</body></html>`;
 }
 
 // ---------- Expenses ----------

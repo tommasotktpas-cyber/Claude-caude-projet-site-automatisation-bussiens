@@ -112,3 +112,27 @@ test('on-demand TLS only for known domains', async () => {
   run("UPDATE salons SET plan = 'premium' WHERE id = ?", salon.id);
   assert.equal((await fetch(`${base}/api/internal/domain-check?domain=salon-compta.ch`)).status, 200);
 });
+
+test('Swiss QR-bill: valid payload and payment part on open invoices', async () => {
+  const q = require('../server/qrbill');
+  assert.equal(q.validIban('CH93 0076 2011 6238 5295 7'), true);
+  assert.equal(q.validIban('CH93 0076 2011 6238 5295 8'), false);
+  assert.equal(q.scorReference('2026-0001'), 'RF3120260001');
+  assert.equal(q.qrrReference('21000000000313947143000901'), '210000000003139471430009017');
+  const lines = q.payload({
+    iban: 'CH93 0076 2011 6238 5295 7', creditor: { name: 'Salon', street: 'Rue 1', zip: '1200', town: 'Genève', country: 'CH' },
+    amountCents: 21620, currency: 'CHF', debtor: q.parseAddress('Marie', 'Av. 2\n1003 Lausanne'), refType: 'SCOR', reference: 'RF3120260001', message: 'Facture 2026-0001',
+  }).split('\n');
+  assert.equal(lines.length, 31);
+  assert.deepEqual(lines.slice(0, 4), ['SPC', '0200', '1', 'CH9300762011623852957']);
+  assert.equal(lines[18], '216.20');
+  assert.deepEqual(lines.slice(20, 27), ['S', 'Marie', 'Av. 2', '', '1003', 'Lausanne', 'CH']);
+  assert.equal(lines[30], 'EPD');
+
+  run("UPDATE salons SET zip = '1204', address = 'Rue du Rhône 1' WHERE id = ?", salon.id);
+  const inv = await req('/api/pro/invoices', { method: 'POST', body: { customer_name: 'Marie', customer_address: 'Av. 2\n1003 Lausanne', items: [{ label: 'Soin', qty: 1, unit: 80 }] } });
+  const html = await (await fetch(`${base}/facture/${inv.body.token}`)).text();
+  assert.match(html, /Section paiement/);
+  assert.match(html, /Récépissé/);
+  assert.match(html, /aria-label="QR-code de paiement"/);
+});
