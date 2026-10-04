@@ -370,3 +370,15 @@ body.in-modal .drawer-backdrop { background: transparent; }
 .slot small { display: block; font-size: .68rem; color: var(--danger); font-weight: 700; }
 .slot.selected small { color: #fff; }
 .deal-banner { background: var(--danger-soft); color: var(--danger); font-weight: 600; font-size: .88rem; padding: 8px 12px; border-radius: 10px; margin-bottom: 10px; }
+
+/* Messages & AI assistant */
+.nav-count { margin-left: auto; min-width: 20px; padding: 1px 7px; border-radius: 99px; background: var(--brand, #c9a227); color: #fff; font-size: .72rem; font-weight: 700; text-align: center; }
+.conv-item.active { background: var(--surface-2); margin: 0 -16px; padding-left: 16px; padding-right: 16px; }
+.note-box { padding: 10px 14px; background: var(--surface-2); border-radius: 12px; font-size: .9rem; }
+.chat-log { display: flex; flex-direction: column; gap: 8px; max-height: 460px; overflow-y: auto; padding: 4px 2px; }
+.bubble { max-width: 82%; padding: 9px 13px; border-radius: 16px; background: var(--surface-2); font-size: .92rem; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bubble.from-client { align-self: flex-end; background: var(--ink, #1d1d1f); color: #fff; border-bottom-right-radius: 4px; }
+.bubble.from-client .muted { color: rgba(255,255,255,.7); }
+.bubble.from-assistant, .bubble.from-team { align-self: flex-start; border-bottom-left-radius: 4px; }
+.bubble.from-team { background: var(--ok-soft); }
+.bubble.typing { opacity: .6; }

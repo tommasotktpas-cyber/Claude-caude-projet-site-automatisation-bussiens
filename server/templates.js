@@ -318,6 +318,7 @@ ${sections.join('\n')}
   addEventListener('message',function(e){if(e.origin===location.origin&&e.data&&e.data.lumea==='close')close()});
 })();
 </script>
+${preview ? '' : `<script src="/js/chat-widget.js" data-salon="${slug}" data-color="${esc(accent)}" data-name="${esc(salon.name)}" data-offset="1" defer></script>`}
 </body>
 </html>`;
 }

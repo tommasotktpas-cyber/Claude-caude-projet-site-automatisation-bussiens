@@ -424,6 +424,12 @@
       document.documentElement.style.setProperty('--brand-soft', `color-mix(in srgb, ${accent} 14%, #fff)`);
       if (inModal) document.body.classList.add('in-modal');
       render();
+      if (!embed) {
+        // Chat with the salon (its AI assistant, or the team).
+        const chat = Object.assign(document.createElement('script'), { src: '/js/chat-widget.js', defer: true });
+        Object.assign(chat.dataset, { salon: data.salon.slug, color: accent, name: data.salon.name, offset: '1' });
+        document.body.appendChild(chat);
+      }
       const pre = Number(params.get('service'));
       if (params.get('book') === '1') {
         bk.service = null;

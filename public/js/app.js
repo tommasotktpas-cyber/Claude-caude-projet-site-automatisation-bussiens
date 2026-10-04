@@ -1437,11 +1437,160 @@ async function renderMyPlanning() {
 }
 
 // =====================================================================
+// Messages (calls & chats handled by the assistant, or by the team)
+// =====================================================================
+const msgState = { filter: '', open: null, timer: null };
+const CONV_STATUS = { open: ['En cours', ''], to_handle: ['À traiter', 'badge-warn'], done: ['Traité', 'badge-ok'] };
+const FROM_LABEL = { client: 'Client', assistant: 'Assistant IA', team: 'Équipe' };
+
+async function updateMsgCount() {
+  if (ctx.isStaff) return;
+  try {
+    const r = await api(P('/conversations?status=to_handle'));
+    const el = $('#msg-count');
+    el.textContent = r.to_handle;
+    el.hidden = !r.to_handle;
+  } catch { /* badge only */ }
+}
+
+async function renderMessages() {
+  clearInterval(msgState.timer);
+  const q = msgState.filter ? `?status=${msgState.filter}` : '';
+  const { conversations, to_handle } = await api(P(`/conversations${q}`));
+  view.innerHTML = `${head('Messages', `<div class="seg">${[['', 'Tous'], ['to_handle', `À traiter (${to_handle})`], ['done', 'Traités']].map(([k, l]) => `<button class="btn btn-sm ${msgState.filter === k ? 'btn-brand' : 'btn-ghost'}" data-filter="${k}">${l}</button>`).join(' ')}</div>`)}
+    <p class="small muted" style="margin-top:-6px">Appels pris par l’assistant IA et messages du chat de votre site. Répondez vous-même dans le chat : l’IA se retire de la conversation.</p>
+    <div class="two-col" style="grid-template-columns:minmax(260px,1fr) 2fr">
+      <div class="card" style="padding:8px 16px">${conversations.map((c) => `
+        <div class="list-item conv-item ${msgState.open === c.id ? 'active' : ''}" data-conv="${c.id}" style="cursor:pointer">
+          <span data-icon-inline="${c.channel === 'phone' ? 'phone' : 'chat'}" class="muted" style="width:18px"></span>
+          <div class="grow" style="min-width:0"><div class="row between"><b>${esc(c.customer_name || c.customer_phone || (c.channel === 'phone' ? 'Appel' : 'Visiteur du site'))}</b>${c.unread ? '<span class="badge badge-brand">Nouveau</span>' : ''}</div>
+            <div class="small muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.outcome || c.last)}</div>
+            <div class="small muted">${esc(c.updated_at.slice(0, 16).replace('T', ' '))} · <span class="badge ${CONV_STATUS[c.status][1]}">${CONV_STATUS[c.status][0]}</span></div></div>
+        </div>`).join('') || '<div class="empty">Aucune conversation pour le moment. Activez l’assistant dans <a href="#assistant">Assistant IA</a>.</div>'}</div>
+      <div class="card" id="conv-pane"><div class="empty">Sélectionnez une conversation.</div></div>
+    </div>`;
+  $$('[data-icon-inline]').forEach((el) => { el.innerHTML = ICONS[el.dataset.iconInline]; });
+  view.querySelectorAll('[data-filter]').forEach((b) => { b.onclick = () => { msgState.filter = b.dataset.filter; renderMessages(); }; });
+  view.querySelectorAll('[data-conv]').forEach((el) => { el.onclick = () => { msgState.open = Number(el.dataset.conv); openConversation(); }; });
+  if (msgState.open && conversations.some((c) => c.id === msgState.open)) openConversation();
+  updateMsgCount();
+  // Light polling so new chat messages appear without reloading.
+  msgState.timer = setInterval(() => { if (location.hash === '#messages' && !document.hidden && !$('#conv-reply')?.value) renderMessages(); else if (location.hash !== '#messages') clearInterval(msgState.timer); }, 20000);
+}
+
+async function openConversation() {
+  const pane = $('#conv-pane');
+  const { conversation: c, messages } = await api(P(`/conversations/${msgState.open}`));
+  $$('.conv-item').forEach((el) => el.classList.toggle('active', Number(el.dataset.conv) === c.id));
+  pane.innerHTML = `<div class="row between"><div><h3 style="margin:0">${esc(c.customer_name || (c.channel === 'phone' ? 'Appel entrant' : 'Visiteur du site'))}</h3>
+      <div class="small muted">${c.channel === 'phone' ? 'Appel téléphonique' : 'Chat du site'}${c.customer_phone ? ` · <a href="tel:${esc(c.customer_phone)}">${esc(c.customer_phone)}</a>` : ''}</div></div>
+      <div class="row" style="gap:6px">${c.status !== 'done' ? '<button class="btn btn-ghost btn-sm" id="conv-done">Marquer traité</button>' : '<button class="btn btn-ghost btn-sm" id="conv-reopen">Rouvrir</button>'}
+      ${c.human_mode ? '<button class="btn btn-ghost btn-sm" id="conv-ai">Rendre la main à l’IA</button>' : ''}</div></div>
+    ${c.outcome ? `<div class="note-box" style="margin:12px 0"><b>Résultat :</b> ${esc(c.outcome)}${c.booking_id ? ' · <a href="#agenda">voir l’agenda</a>' : ''}</div>` : ''}
+    <div class="chat-log">${messages.map((m) => `<div class="bubble from-${m.from}"><div class="small muted">${FROM_LABEL[m.from] || m.from}${m.author ? ` · ${esc(m.author)}` : ''} · ${esc((m.at || '').slice(11, 16))}</div>${esc(m.text)}</div>`).join('')}</div>
+    ${c.channel === 'chat' ? `<form id="conv-form" class="row" style="flex-wrap:nowrap;margin-top:12px"><input id="conv-reply" placeholder="Votre réponse au client…" autocomplete="off"><button class="btn btn-brand">Envoyer</button></form>` : '<p class="small muted" style="margin-top:12px">Pour un appel, rappelez le client au numéro ci-dessus.</p>'}`;
+  const log = $('.chat-log', pane);
+  log.scrollTop = log.scrollHeight;
+  const patch = async (body) => { await api(P(`/conversations/${c.id}`), { method: 'PATCH', body }); renderMessages(); };
+  if ($('#conv-done')) $('#conv-done').onclick = () => patch({ status: 'done' });
+  if ($('#conv-reopen')) $('#conv-reopen').onclick = () => patch({ status: 'to_handle' });
+  if ($('#conv-ai')) $('#conv-ai').onclick = () => patch({ human_mode: false });
+  if ($('#conv-form')) {
+    $('#conv-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const text = $('#conv-reply').value.trim();
+      if (!text) return;
+      try { await api(P(`/conversations/${c.id}/reply`), { method: 'POST', body: { text } }); renderMessages(); } catch (err) { toast(err.message, 'error'); }
+    };
+  }
+}
+
+// =====================================================================
+// AI assistant (phone receptionist + website chat)
+// =====================================================================
+const simState = { session: null, mode: 'chat', log: [] };
+
+async function renderAssistant() {
+  const d = await api(P('/assistant'));
+  const s = d.settings;
+  const st = d.stats || {};
+  view.innerHTML = `${head('Assistant IA')}
+    <div class="kpis">
+      <div class="kpi"><div class="label">Appels pris (30 j)</div><div class="value">${st.calls || 0}</div></div>
+      <div class="kpi"><div class="label">Chats (30 j)</div><div class="value">${st.chats || 0}</div></div>
+      <div class="kpi"><div class="label">RDV pris par l’IA</div><div class="value">${st.bookings || 0}</div></div>
+      <div class="kpi"><div class="label">Statut</div><div style="margin-top:8px">${d.ai_ready ? '<span class="badge badge-ok"><span class="dot"></span>IA connectée</span>' : '<span class="badge badge-warn">Clé IA manquante</span>'}
+        ${d.voice_ready ? '<span class="badge badge-ok">Téléphonie OK</span>' : '<span class="badge">Téléphonie non configurée</span>'}</div></div>
+    </div>
+    <div class="two-col" style="margin-top:18px">
+      <form class="card" id="ai-form">
+        <h3>Réglages</h3>
+        <label class="check"><input type="checkbox" name="ai_phone_enabled" ${s.ai_phone_enabled ? 'checked' : ''}> Standard téléphonique IA : si personne ne décroche, l’assistant répond</label>
+        <label class="check"><input type="checkbox" name="ai_chat_enabled" ${s.ai_chat_enabled ? 'checked' : ''}> Chat IA sur votre site (sinon, les messages arrivent dans « Messages » et vous répondez vous-même)</label>
+        <div class="grid-2" style="margin-top:10px">
+          <div class="field"><label>Numéro Lumea du salon (Twilio)</label><input name="ai_twilio_number" value="${esc(s.ai_twilio_number)}" placeholder="+41 22 555 00 00"><div class="hint">Le numéro que vos clients appellent (ou vers lequel vous renvoyez votre ligne).</div></div>
+          <div class="field"><label>Faire d’abord sonner</label><input name="ai_forward_phone" value="${esc(s.ai_forward_phone)}" placeholder="+41 79 123 45 67"><div class="hint">Votre portable ou fixe. Vide = l’IA répond directement.</div></div>
+          <div class="field"><label>L’IA décroche après (secondes)</label><input name="ai_ring_seconds" type="number" min="5" max="60" value="${s.ai_ring_seconds}"></div>
+          <div class="field"><label>Délai minimum d’un RDV pris par l’IA (min)</label><input name="ai_min_notice_min" type="number" min="15" max="1440" value="${s.ai_min_notice_min}"><div class="hint">Jamais moins de 15 minutes après l’appel.</div></div>
+        </div>
+        <div class="field"><label>Ce que l’assistant doit savoir</label><textarea name="ai_instructions" rows="5" placeholder="Parking gratuit derrière le salon. Paiement TWINT accepté. Pas de coloration le samedi. Pour les enfants de moins de 10 ans, coupe enfant uniquement.">${esc(s.ai_instructions)}</textarea>
+          <div class="hint">Prestations, prix, équipe et horaires sont déjà connus de l’assistant.</div></div>
+        <button class="btn btn-brand">Enregistrer</button>
+      </form>
+      <div class="stack">
+        <div class="card"><h3>Tester l’assistant</h3>
+          <p class="small muted">Parlez-lui comme un client. Mode test : aucun rendez-vous n’est réellement créé.</p>
+          <div class="row" style="gap:6px;margin-bottom:8px"><button class="btn btn-sm ${simState.mode === 'chat' ? 'btn-brand' : 'btn-ghost'}" data-sim-mode="chat">Chat</button><button class="btn btn-sm ${simState.mode === 'phone' ? 'btn-brand' : 'btn-ghost'}" data-sim-mode="phone">Téléphone</button><div class="grow"></div><button class="btn btn-ghost btn-sm" id="sim-reset">Recommencer</button></div>
+          <div class="chat-log" id="sim-log" style="max-height:320px">${simState.log.map((m) => `<div class="bubble from-${m.from}">${esc(m.text)}</div>`).join('') || '<div class="small muted">Ex. : « Bonjour, vous auriez de la place jeudi vers 16 h pour une coupe ? »</div>'}</div>
+          <form id="sim-form" class="row" style="flex-wrap:nowrap;margin-top:10px"><input id="sim-text" placeholder="Votre message…" autocomplete="off"><button class="btn btn-brand">Envoyer</button></form>
+        </div>
+        <div class="card"><h3>Brancher votre ligne (Twilio)</h3>
+          <ol class="small" style="padding-left:18px;margin:0">
+            <li>Achetez un numéro suisse sur Twilio (≈ 1 CHF/mois) ou renvoyez votre ligne actuelle vers lui en cas de non-réponse.</li>
+            <li>Dans Twilio › Phone Numbers › votre numéro › <i>A call comes in</i> : Webhook, POST<br><code class="block" id="wh-voice">${esc(d.webhooks.voice)}</code></li>
+            <li><i>Call status changes</i> : <code>${esc(d.webhooks.status)}</code></li>
+            <li>Indiquez ce numéro ci-contre et activez le standard IA.</li>
+          </ol>
+          <p class="small muted" style="margin-bottom:0">L’assistant se présente toujours comme une intelligence artificielle, consulte votre agenda en temps réel, ne réserve jamais dans le passé ni trop tôt, et vous transmet les demandes qu’il ne peut pas traiter.</p>
+        </div>
+      </div>
+    </div>`;
+  $('#ai-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = formData(e.target);
+    f.ai_phone_enabled = !!f.ai_phone_enabled;
+    f.ai_chat_enabled = !!f.ai_chat_enabled;
+    try { await api(P('/assistant'), { method: 'PUT', body: f }); toast('Assistant enregistré.'); } catch (err) { toast(err.message, 'error'); }
+  };
+  view.querySelectorAll('[data-sim-mode]').forEach((b) => { b.onclick = () => { simState.mode = b.dataset.simMode; simState.session = null; simState.log = []; renderAssistant(); }; });
+  $('#sim-reset').onclick = () => { simState.session = null; simState.log = []; renderAssistant(); };
+  $('#sim-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const input = $('#sim-text');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    simState.log.push({ from: 'client', text });
+    const log = $('#sim-log');
+    log.innerHTML = `${simState.log.map((m) => `<div class="bubble from-${m.from}">${esc(m.text)}</div>`).join('')}<div class="bubble from-assistant typing">…</div>`;
+    log.scrollTop = log.scrollHeight;
+    try {
+      const r = await api(P('/assistant/test'), { method: 'POST', body: { text, session: simState.session, mode: simState.mode } });
+      simState.session = r.session;
+      simState.log.push({ from: 'assistant', text: r.reply + (r.endCall ? ' 📞 (fin d’appel)' : '') });
+    } catch (err) { simState.log.push({ from: 'assistant', text: `Erreur : ${err.message}` }); }
+    log.innerHTML = simState.log.map((m) => `<div class="bubble from-${m.from}">${esc(m.text)}</div>`).join('');
+    log.scrollTop = log.scrollHeight;
+    $('#sim-text').focus();
+  };
+}
+
+// =====================================================================
 // Router
 // =====================================================================
 const ROUTES = {
   dashboard: renderDashboard, agenda: renderAgenda, clients: () => renderClients(), services: renderServices,
-  team: renderTeam, reviews: renderReviews, automations: renderAutomations, settings: renderSettings, billing: renderBilling, site: renderSiteEditor, caisse: renderTill, stock: renderStock, gains: renderEarnings, planning: renderMyPlanning,
+  team: renderTeam, reviews: renderReviews, automations: renderAutomations, settings: renderSettings, billing: renderBilling, site: renderSiteEditor, caisse: renderTill, stock: renderStock, messages: renderMessages, assistant: renderAssistant, gains: renderEarnings, planning: renderMyPlanning,
 };
 
 async function route() {
@@ -1483,4 +1632,6 @@ async function route() {
   $('#public-link').href = `/salon.html?s=${encodeURIComponent(ctx.salon.slug)}`;
   addEventListener('hashchange', route);
   route();
+  updateMsgCount();
+  setInterval(updateMsgCount, 60000);
 })();

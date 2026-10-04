@@ -943,4 +943,101 @@ router.post('/site/design-requests', (req, res) => {
   res.status(201).json({ ok: true });
 });
 
+// ---------- AI assistant (phone + website chat) & inbox ----------
+
+router.get('/assistant', (req, res) => {
+  const s = req.salon;
+  const ai = require('../ai');
+  res.json({
+    settings: {
+      ai_phone_enabled: s.ai_phone_enabled, ai_chat_enabled: s.ai_chat_enabled, ai_forward_phone: s.ai_forward_phone,
+      ai_twilio_number: s.ai_twilio_number, ai_ring_seconds: s.ai_ring_seconds, ai_min_notice_min: s.ai_min_notice_min, ai_instructions: s.ai_instructions,
+    },
+    ai_ready: ai.enabled(),
+    voice_ready: !!process.env.TWILIO_AUTH_TOKEN,
+    webhooks: { voice: `${APP_URL}/api/voice/incoming`, status: `${APP_URL}/api/voice/status` },
+    stats: one(
+      `SELECT COUNT(*) AS total, SUM(channel = 'phone') AS calls, SUM(channel = 'chat') AS chats, SUM(booking_id IS NOT NULL) AS bookings
+       FROM ai_conversations WHERE salon_id = ? AND channel != 'test' AND created_at >= datetime('now', '-30 days')`, s.id,
+    ),
+  });
+});
+
+router.put('/assistant', (req, res) => {
+  const b = req.body || {};
+  const s = req.salon;
+  const phone = (v, cur) => (v === undefined ? cur : clean(v, 30).replace(/[^\d+ ]/g, ''));
+  run(
+    `UPDATE salons SET ai_phone_enabled=?, ai_chat_enabled=?, ai_forward_phone=?, ai_twilio_number=?, ai_ring_seconds=?, ai_min_notice_min=?, ai_instructions=?
+     WHERE id=?`,
+    b.ai_phone_enabled === undefined ? s.ai_phone_enabled : (b.ai_phone_enabled ? 1 : 0),
+    b.ai_chat_enabled === undefined ? s.ai_chat_enabled : (b.ai_chat_enabled ? 1 : 0),
+    phone(b.ai_forward_phone, s.ai_forward_phone), phone(b.ai_twilio_number, s.ai_twilio_number),
+    int(b.ai_ring_seconds, 5, 60, s.ai_ring_seconds), int(b.ai_min_notice_min, 15, 1440, s.ai_min_notice_min),
+    b.ai_instructions === undefined ? s.ai_instructions : clean(b.ai_instructions, 3000),
+    s.id,
+  );
+  res.json({ ok: true });
+});
+
+// Simulator: talk to the assistant as a client would. Nothing is booked for real.
+router.post('/assistant/test', async (req, res) => {
+  const text = clean(req.body?.text, 1000);
+  if (!text) throw new HttpError(400, 'Message vide.');
+  if (!require('../ai').enabled()) throw new HttpError(400, 'Assistant IA non connecté : la clé ANTHROPIC_API_KEY doit être définie sur le serveur.');
+  const session = /^[\w-]{8,40}$/.test(req.body?.session || '') ? req.body.session : randomToken(12);
+  const salon = one('SELECT * FROM salons WHERE id = ?', req.salon.id);
+  const asPhone = req.body?.mode === 'phone';
+  const result = await require('../assistant').respond({
+    salon, channel: 'test', externalId: `${asPhone ? 'p' : 'c'}-${session}`, text, dryRun: true,
+    callerPhone: asPhone ? '+41 79 000 00 00' : '',
+  });
+  res.json({ session, ...result });
+});
+
+const convRow = (c) => ({
+  id: c.id, channel: c.channel, customer_name: c.customer_name, customer_phone: c.customer_phone, outcome: c.outcome, summary: c.summary,
+  status: c.status, unread: c.unread, human_mode: c.human_mode, booking_id: c.booking_id, created_at: c.created_at, updated_at: c.updated_at,
+  last: (JSON.parse(c.transcript).at(-1) || {}).text || '',
+});
+
+router.get('/conversations', (req, res) => {
+  const status = ['open', 'to_handle', 'done'].includes(req.query.status) ? req.query.status : null;
+  const rows = all(
+    `SELECT * FROM ai_conversations WHERE salon_id = ? AND channel != 'test' ${status ? 'AND status = ?' : ''}
+     ORDER BY unread DESC, updated_at DESC LIMIT 200`, ...(status ? [req.salon.id, status] : [req.salon.id]),
+  );
+  res.json({ conversations: rows.map(convRow), to_handle: one("SELECT COUNT(*) AS n FROM ai_conversations WHERE salon_id = ? AND status = 'to_handle'", req.salon.id).n });
+});
+
+function ownConversation(req) {
+  const c = one('SELECT * FROM ai_conversations WHERE id = ? AND salon_id = ?', Number(req.params.id), req.salon.id);
+  if (!c) throw new HttpError(404, 'Conversation introuvable.');
+  return c;
+}
+
+router.get('/conversations/:id', (req, res) => {
+  const c = ownConversation(req);
+  if (c.unread) run('UPDATE ai_conversations SET unread = 0 WHERE id = ?', c.id);
+  res.json({ conversation: convRow(c), messages: JSON.parse(c.transcript) });
+});
+
+router.post('/conversations/:id/reply', (req, res) => {
+  const c = ownConversation(req);
+  if (c.channel !== 'chat') throw new HttpError(400, 'Pour un appel, rappelez le client au numéro indiqué.');
+  const messages = require('../assistant').teamReply(c.id, req.salon.id, clean(req.body?.text, 2000), req.user.name);
+  res.json({ messages });
+});
+
+router.patch('/conversations/:id', (req, res) => {
+  const c = ownConversation(req);
+  const b = req.body || {};
+  run(
+    'UPDATE ai_conversations SET status = ?, human_mode = ?, unread = 0 WHERE id = ?',
+    ['open', 'to_handle', 'done'].includes(b.status) ? b.status : c.status,
+    b.human_mode === undefined ? c.human_mode : (b.human_mode ? 1 : 0), c.id,
+  );
+  res.json({ ok: true });
+});
+
 module.exports = router;

@@ -77,6 +77,7 @@ function createApp() {
   app.use('/api/public', require('./routes/public'));
   app.use('/api/pro', require('./routes/pro'));
   app.use('/api/admin', require('./routes/admin'));
+  app.use('/api/voice', require('./voice').router());
   app.get('/api/plans', (_req, res) => {
     const { PLANS, TEMPLATE_PRICING } = require('./plans');
     const extra = require('./plans');

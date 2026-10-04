@@ -4,7 +4,7 @@ const { one, all, run } = require('../db');
 const T = require('../time');
 const { getSlots, nextAvailableDays } = require('../availability');
 const { createBooking, cancelBooking, rescheduleBooking, HttpError, clean, EMAIL_RE } = require('../bookings');
-const { rateLimit } = require('../auth');
+const { rateLimit, randomToken } = require('../auth');
 const { buildIcs } = require('../ics');
 const payments = require('../payments');
 const billing = require('../billing');
@@ -38,8 +38,9 @@ function salonBySlug(slug) {
 function publicSalon(s) {
   const {
     ical_token, owner_id, trial_ends_at, plan, stripe_customer_id, stripe_subscription_id, stripe_account_id, stripe_charges_enabled,
-    boost_until, boost_subscription_id, ...rest
+    boost_until, boost_subscription_id, ai_forward_phone, ai_twilio_number, ai_instructions, ai_ring_seconds, ...rest
   } = s;
+  rest.chat_enabled = 1; // the chat always reaches someone: the AI, or the team
   // Deposits are only announced when they can actually be collected.
   if (billing.depositMode(s) === 'off') rest.deposit_percent = 0;
   rest.online_booking = billing.salonActive(s);
@@ -319,6 +320,35 @@ router.get('/bookings/:token/ics', (req, res) => {
     summary: `${d.service_name} — ${d.salon_name}`, location: `${d.address}, ${d.city}`,
     description: `Avec ${d.staff_name}`, cancelled: d.status === 'cancelled',
   }]));
+});
+
+// ---------- Website chat (AI assistant, or the team itself) ----------
+
+const CHAT_MAX_MESSAGES = 40;
+const chatSession = (v) => (/^[\w-]{16,40}$/.test(String(v || '')) ? String(v) : null);
+const chatLog = (c) => (c ? JSON.parse(c.transcript).map(({ from, text, at }) => ({ from, text, at })) : []);
+
+router.post('/salons/:slug/chat', rateLimit('chat', 30, 10 * 60 * 1000), async (req, res) => {
+  const salon = salonBySlug(req.params.slug);
+  const text = clean(req.body?.text, 1000);
+  if (!text) throw new HttpError(400, 'Message vide.');
+  const session = chatSession(req.body?.session) || randomToken(18);
+  const existing = one("SELECT * FROM ai_conversations WHERE salon_id = ? AND channel = 'chat' AND external_id = ?", salon.id, session);
+  if (existing && JSON.parse(existing.transcript).length >= CHAT_MAX_MESSAGES) {
+    throw new HttpError(429, 'Conversation trop longue : appelez le salon ou réservez directement en ligne.');
+  }
+  const ai = require('../ai');
+  const humanOnly = !salon.ai_chat_enabled || !ai.enabled();
+  const result = await require('../assistant').respond({ salon, channel: 'chat', externalId: session, text, humanOnly });
+  const conv = one('SELECT * FROM ai_conversations WHERE id = ?', result.conversationId);
+  res.json({ session, reply: result.reply, human: !!(humanOnly || conv.human_mode), messages: chatLog(conv) });
+});
+
+router.get('/salons/:slug/chat/:session', (req, res) => {
+  const salon = salonBySlug(req.params.slug);
+  const session = chatSession(req.params.session);
+  const conv = session && one("SELECT * FROM ai_conversations WHERE salon_id = ? AND channel = 'chat' AND external_id = ?", salon.id, session);
+  res.json({ messages: chatLog(conv), human: !!(conv?.human_mode || !salon.ai_chat_enabled || !require('../ai').enabled()) });
 });
 
 module.exports = router;

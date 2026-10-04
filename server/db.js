@@ -43,6 +43,8 @@ rebuildTable('salons', {
 });
 // v3: staff accounts (employees log in and see their own agenda).
 rebuildTable('users', { from: "'client','pro','admin')", to: "'client','pro','admin','staff')" });
+// v4: bookings taken by the AI assistant (phone, website chat).
+rebuildTable('bookings', { from: "source IN ('online','widget','pro')", to: "source IN ('online','widget','pro','phone','chat')" });
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
@@ -161,7 +163,7 @@ CREATE TABLE IF NOT EXISTS bookings (
   price_cents INTEGER NOT NULL,
   deposit_cents INTEGER NOT NULL DEFAULT 0,
   paid_cents INTEGER NOT NULL DEFAULT 0,
-  source TEXT NOT NULL DEFAULT 'online' CHECK (source IN ('online','widget','pro')),
+  source TEXT NOT NULL DEFAULT 'online' CHECK (source IN ('online','widget','pro','phone','chat')),
   token TEXT NOT NULL UNIQUE,
   notes TEXT NOT NULL DEFAULT '',
   reminder_sent INTEGER NOT NULL DEFAULT 0,
@@ -389,6 +391,38 @@ db.exec(`CREATE TABLE IF NOT EXISTS user_identities (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (provider, subject)
 )`);
+// AI assistant (phone receptionist, website chat) and the salon inbox.
+addColumn('salons', 'ai_phone_enabled', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('salons', 'ai_chat_enabled', 'INTEGER NOT NULL DEFAULT 1');
+addColumn('salons', 'ai_forward_phone', "TEXT NOT NULL DEFAULT ''");
+addColumn('salons', 'ai_twilio_number', "TEXT NOT NULL DEFAULT ''");
+addColumn('salons', 'ai_ring_seconds', 'INTEGER NOT NULL DEFAULT 15');
+addColumn('salons', 'ai_min_notice_min', 'INTEGER NOT NULL DEFAULT 45');
+addColumn('salons', 'ai_instructions', "TEXT NOT NULL DEFAULT ''");
+db.exec(`
+CREATE TABLE IF NOT EXISTS ai_conversations (
+  id INTEGER PRIMARY KEY,
+  salon_id INTEGER NOT NULL REFERENCES salons(id) ON DELETE CASCADE,
+  channel TEXT NOT NULL CHECK (channel IN ('phone','chat','test')),
+  external_id TEXT NOT NULL,
+  customer_phone TEXT NOT NULL DEFAULT '',
+  customer_name TEXT NOT NULL DEFAULT '',
+  api_messages TEXT NOT NULL DEFAULT '[]',
+  transcript TEXT NOT NULL DEFAULT '[]',
+  summary TEXT NOT NULL DEFAULT '',
+  outcome TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','to_handle','done')),
+  booking_id INTEGER REFERENCES bookings(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (salon_id, channel, external_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_conv_salon ON ai_conversations (salon_id, updated_at);
+`);
+// human_mode: a team member took over the chat, the AI stays silent. unread: new client message for the team.
+addColumn('ai_conversations', 'human_mode', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('ai_conversations', 'unread', 'INTEGER NOT NULL DEFAULT 0');
+
 db.exec(`CREATE TABLE IF NOT EXISTS stripe_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
 
 /** Runs fn inside an IMMEDIATE transaction (serialises writers — prevents double booking). Re-entrant. */

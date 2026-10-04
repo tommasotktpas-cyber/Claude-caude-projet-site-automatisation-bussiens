@@ -53,13 +53,14 @@ function upsertClient(salonId, customer, userId) {
  */
 function createBooking({ salonId, serviceId, staffId = null, date, time, customer, userId = null, source = 'online', force = false, style = null }) {
   if (!T.isDate(date) || !T.isTime(time)) throw new HttpError(400, 'Date ou heure invalide.');
-  const cust = validateCustomer(customer, { requireEmail: source !== 'pro' });
+  const cust = validateCustomer(customer, { requireEmail: !['pro', 'phone', 'chat'].includes(source) });
   const salon = one('SELECT * FROM salons WHERE id = ?', salonId);
   const service = one('SELECT * FROM services WHERE id = ? AND salon_id = ?', Number(serviceId), salonId);
   if (!salon || !service || (!service.active && !force)) throw new HttpError(404, 'Prestation introuvable.');
   const billing = require('./billing');
-  if (source !== 'pro' && !billing.salonActive(salon)) throw new HttpError(403, 'La réservation en ligne est momentanément indisponible pour ce salon. Merci de le contacter directement.');
-  const mode = source === 'pro' ? 'off' : billing.depositMode(salon);
+  if (!['pro'].includes(source) && !billing.salonActive(salon)) throw new HttpError(403, 'La réservation en ligne est momentanément indisponible pour ce salon. Merci de le contacter directement.');
+  // No online deposit for bookings made by the salon or by the AI assistant (phone / chat).
+  const mode = ['pro', 'phone', 'chat'].includes(source) ? 'off' : billing.depositMode(salon);
 
   let dealPct = 0;
   const id = tx(() => {

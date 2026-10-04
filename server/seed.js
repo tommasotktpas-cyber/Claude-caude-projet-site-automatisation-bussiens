@@ -167,6 +167,31 @@ function seed() {
         // Hugo rents his chair (independent); Inès earns a share of her services.
         run("UPDATE staff SET employment = 'independant', pay_model = 'loyer', chair_rent_cents = 90000 WHERE id = ?", hugo.id);
         run("UPDATE staff SET pay_model = 'commission', rate_percent = 45 WHERE salon_id = ? AND name LIKE 'Inès%'", salon.id);
+        // What the AI assistant handled while the team was busy.
+        run("UPDATE salons SET ai_phone_enabled = 1, ai_forward_phone = '+41 79 555 12 34', ai_twilio_number = '+41 22 555 00 00' WHERE id = ?", salon.id);
+        const at = (min) => T.addMinutes(`${today}T08:00`, min);
+        const conv = (channel, ext, name, phone, status, outcome, log) => run(
+          `INSERT INTO ai_conversations (salon_id, channel, external_id, customer_name, customer_phone, status, outcome, transcript, unread)
+           VALUES (?,?,?,?,?,?,?,?,?)`, salon.id, channel, ext, name, phone, status, outcome,
+          JSON.stringify(log.map(([from, text], i) => ({ from, text, at: at(i) }))), status === 'to_handle' ? 1 : 0,
+        );
+        conv('phone', 'demo-call-1', 'Luca Bianchi', '+41 79 321 54 76', 'done', 'RDV réservé : Coupe homme, jeudi à 16:00 avec Hugo', [
+          ['assistant', 'Bonjour, vous êtes bien chez Maison Céleste. L’équipe est occupée : je suis l’assistant virtuel du salon, une intelligence artificielle. Que puis-je faire pour vous ?'],
+          ['client', 'Bonjour, je voudrais une coupe jeudi vers seize heures.'],
+          ['assistant', 'Jeudi, j’ai seize heures avec Hugo ou seize heures trente avec Inès. Lequel vous convient ?'],
+          ['client', 'Seize heures avec Hugo, c’est parfait. Luca Bianchi.'],
+          ['assistant', 'C’est noté, Luca : jeudi à seize heures avec Hugo. Vous allez recevoir un SMS de confirmation. Bonne journée !'],
+        ]);
+        conv('phone', 'demo-call-2', 'Sophie Keller', '+41 78 210 33 90', 'to_handle', 'Message : souhaite un devis pour une coloration + mèches pour son mariage le 14 novembre, rappeler après 17 h.', [
+          ['client', 'Bonjour, c’est pour un devis pour mon mariage, une coloration avec des mèches.'],
+          ['assistant', 'Félicitations ! Pour un devis sur mesure, je transmets votre demande à l’équipe, qui vous rappellera. À quel moment êtes-vous joignable ?'],
+          ['client', 'Après dix-sept heures. Sophie Keller.'],
+          ['assistant', 'C’est noté, Sophie : l’équipe vous rappelle après dix-sept heures. Belle journée !'],
+        ]);
+        conv('chat', 'demo-chat-1', 'Visiteur du site', '', 'to_handle', 'Message : Est-ce que vous faites les tresses africaines ?', [
+          ['client', 'Bonjour, est-ce que vous faites les tresses africaines ?'],
+          ['assistant', 'Bonjour ! Les tresses ne figurent pas dans nos prestations en ligne. Je transmets votre question à l’équipe, qui vous répondra ici même.'],
+        ]);
       }
       const services = all('SELECT * FROM services WHERE salon_id = ?', salon.id);
       const staff = all('SELECT id FROM staff WHERE salon_id = ?', salon.id).map((s) => s.id);
