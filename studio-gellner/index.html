@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Studio Gellner — Architettura a Cortina d'Ampezzo</title>
+  <meta name="description" content="Studio Gellner, architettura nelle Dolomiti dal 1947. Case, restauri e interni a Cortina d'Ampezzo: dall'ascolto del luogo alla consegna delle chiavi.">
+  <meta name="theme-color" content="#1d1c1a">
+  <meta property="og:title" content="Studio Gellner — Architettura nelle Dolomiti">
+  <meta property="og:description" content="Dal luogo alla casa: scoprite come nasce un progetto.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Manrope:wght@300;400;500;600&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"ProfessionalService","name":"Studio Gellner","description":"Studio di architettura a Cortina d'Ampezzo","address":{"@type":"PostalAddress","streetAddress":"Via Menardi 6","postalCode":"32043","addressLocality":"Cortina d'Ampezzo","addressRegion":"BL","addressCountry":"IT"},"url":"https://www.studiogellner.com"}
+  </script>
+</head>
+<body>
+  <!-- Loader: the house is drawn in one line -->
+  <div class="loader" id="loader" aria-hidden="true">
+    <svg viewBox="0 0 220 140" class="loader-mark">
+      <path d="M10 130 H210 M40 130 V70 L110 20 L180 70 V130 M70 130 V95 H100 V130 M125 85 H160 V110 H125 Z M28 80 L110 12 L192 80" />
+    </svg>
+    <div class="loader-name">Studio Gellner</div>
+  </div>
+
+  <div class="cursor" aria-hidden="true"><span></span></div>
+
+  <header class="nav" id="nav">
+    <a href="#top" class="brand" aria-label="Studio Gellner — inizio">
+      <svg viewBox="0 0 40 30" aria-hidden="true"><path d="M3 28 H37 M8 28 V14 L20 4 L32 14 V28 M15 28 V20 H22 V28"/></svg>
+      <span>Studio Gellner</span>
+    </a>
+    <nav class="links" aria-label="Menu principale">
+      <a href="#processo" data-i18n="nav.process">Il processo</a>
+      <a href="#studio" data-i18n="nav.studio">Lo studio</a>
+      <a href="#eredita" data-i18n="nav.heritage">Eredità</a>
+      <a href="#servizi" data-i18n="nav.services">Servizi</a>
+      <a href="#contatti" data-i18n="nav.contact">Contatti</a>
+    </nav>
+    <div class="nav-right">
+      <div class="lang" role="group" aria-label="Lingua">
+        <button data-lang="it" aria-pressed="true">IT</button><button data-lang="en">EN</button><button data-lang="fr">FR</button>
+      </div>
+      <button class="menu-btn" id="menu-btn" aria-label="Menu" aria-expanded="false"><span></span><span></span></button>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- ============ Scroll story ============ -->
+    <section class="story" id="processo" aria-label="Come nasce una casa">
+      <div class="stage">
+        <canvas id="scene" aria-hidden="true"></canvas>
+        <div class="vignette" aria-hidden="true"></div>
+
+        <div class="hero" id="hero">
+          <p class="eyebrow" data-i18n="hero.eyebrow">Architettura · Cortina d'Ampezzo · dal 1947</p>
+          <h1 class="hero-title"><span class="line"><span data-i18n="hero.l1">Costruire</span></span><span class="line"><em data-i18n="hero.l2">nel paesaggio.</em></span></h1>
+          <p class="hero-sub" data-i18n="hero.sub">Case, restauri e interni nelle Dolomiti. Scorrete per vedere come nasce un progetto, dal luogo alla luce della sera.</p>
+          <div class="scroll-hint"><span></span><em data-i18n="hero.scroll">Scorri</em></div>
+        </div>
+
+        <ol class="chapters" id="chapters">
+          <li class="chapter" data-ch="0"><span class="num">01</span><h2 data-i18n="ch0.t">Il luogo</h2><p data-i18n="ch0.p">Tutto comincia dall'ascolto del terreno: pendenza, orientamento, vista sulle Dolomiti, il sole basso d'inverno. Rilievo, picchettamento, primi vincoli.</p></li>
+          <li class="chapter" data-ch="1"><span class="num">02</span><h2 data-i18n="ch1.t">Lo schizzo</h2><p data-i18n="ch1.p">Con la matita nascono i volumi: proporzioni semplici, un tetto a due falde, il dialogo con le case ampezzane. Ne parliamo insieme, finché l'idea è vostra.</p></li>
+          <li class="chapter" data-ch="2"><span class="num">03</span><h2 data-i18n="ch2.t">Il progetto</h2><p data-i18n="ch2.p">Piante, sezioni, dettagli. Ogni metro è pensato per la luce e per la vita di tutti i giorni. Seguiamo pratiche, permessi e computi.</p></li>
+          <li class="chapter" data-ch="3"><span class="num">04</span><h2 data-i18n="ch3.t">La struttura</h2><p data-i18n="ch3.p">Fondazioni, telaio in legno lamellare, solai e capriate. In cantiere, la direzione lavori dello studio garantisce che il disegno diventi costruzione.</p></li>
+          <li class="chapter" data-ch="4"><span class="num">05</span><h2 data-i18n="ch4.t">L'involucro</h2><p data-i18n="ch4.p">Pietra alla base, larice in alto, grandi vetrate verso sud. Materiali del luogo, che invecchiano con dignità e proteggono dal freddo.</p></li>
+          <li class="chapter" data-ch="5"><span class="num">06</span><h2 data-i18n="ch5.t">La luce</h2><p data-i18n="ch5.p">Quando cala la sera la casa si accende. Isolamento, comfort, interni su misura: l'architettura si misura nella vita che ospita.</p></li>
+          <li class="chapter final" data-ch="6"><span class="num">07</span><h2 data-i18n="ch6.t">Benvenuti a casa.</h2><p data-i18n="ch6.p">Raccontateci il vostro terreno, la vostra casa da ristrutturare o il vostro sogno di montagna.</p><a class="btn" href="#contatti" data-magnetic data-i18n="ch6.cta">Iniziamo a parlarne</a></li>
+        </ol>
+
+        <nav class="progress" id="progress" aria-label="Capitoli">
+          <button data-go="0"><i></i><span data-i18n="ch0.t">Il luogo</span></button>
+          <button data-go="1"><i></i><span data-i18n="ch1.t">Lo schizzo</span></button>
+          <button data-go="2"><i></i><span data-i18n="ch2.t">Il progetto</span></button>
+          <button data-go="3"><i></i><span data-i18n="ch3.t">La struttura</span></button>
+          <button data-go="4"><i></i><span data-i18n="ch4.t">L'involucro</span></button>
+          <button data-go="5"><i></i><span data-i18n="ch5.t">La luce</span></button>
+          <button data-go="6"><i></i><span data-i18n="ch6.short">Casa</span></button>
+        </nav>
+        <div class="meter" aria-hidden="true"><span id="meter-fill"></span></div>
+      </div>
+    </section>
+
+    <!-- ============ Manifesto ============ -->
+    <section class="manifesto" aria-label="Manifesto">
+      <p class="big reveal-words" data-i18n="manifesto">Una casa di montagna non si impone al paesaggio: <em>ne prosegue il discorso</em>, con la pietra del luogo, il legno dei suoi boschi e la luce che cambia con le stagioni.</p>
+    </section>
+
+    <div class="marquee" aria-hidden="true"><div class="track"><span>Larice</span><span>Pietra</span><span>Luce</span><span>Neve</span><span>Dolomiti</span><span>Misura</span><span>Artigianato</span><span>Larice</span><span>Pietra</span><span>Luce</span><span>Neve</span><span>Dolomiti</span><span>Misura</span><span>Artigianato</span></div></div>
+
+    <!-- ============ Studio ============ -->
+    <section class="studio" id="studio">
+      <div class="wrap grid-2">
+        <div>
+          <p class="eyebrow reveal" data-i18n="studio.eyebrow">Lo studio</p>
+          <h2 class="h2 reveal" data-i18n="studio.title">Nel cuore di Cortina, un laboratorio di architettura alpina.</h2>
+        </div>
+        <div class="studio-text">
+          <p class="reveal" data-i18n="studio.p1">Nel solco dell'opera di Edoardo Gellner, maestro dell'architettura alpina del Novecento, lo Studio Gellner prosegue a Cortina un modo di progettare fatto di ascolto, misura e precisione.</p>
+          <p class="reveal" data-i18n="studio.p2">Seguiamo ogni progetto per intero: dal rilievo del terreno al disegno degli arredi, dalle autorizzazioni alla direzione dei lavori. Un solo interlocutore, dall'idea alla consegna delle chiavi.</p>
+          <div class="principles">
+            <div class="reveal"><b data-i18n="pr.1t">Luogo</b><span data-i18n="pr.1p">Orientamento, vista, pendenza: il progetto parte da lì.</span></div>
+            <div class="reveal"><b data-i18n="pr.2t">Materia</b><span data-i18n="pr.2p">Pietra, larice, intonaci a calce. Durevoli e locali.</span></div>
+            <div class="reveal"><b data-i18n="pr.3t">Luce</b><span data-i18n="pr.3p">Il sole d'inverno è un materiale da costruzione.</span></div>
+            <div class="reveal"><b data-i18n="pr.4t">Dettaglio</b><span data-i18n="pr.4p">Dalla scala del paesaggio a quella della maniglia.</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Heritage timeline (horizontal on scroll) ============ -->
+    <section class="heritage" id="eredita" aria-label="Eredità di Edoardo Gellner">
+      <div class="heritage-sticky">
+        <div class="heritage-head wrap">
+          <p class="eyebrow" data-i18n="her.eyebrow">Eredità</p>
+          <h2 class="h2" data-i18n="her.title">Edoardo Gellner, 1909 — 2004</h2>
+          <p class="lead" data-i18n="her.lead">Architetto delle Dolomiti. Dal 1947 a Cortina, ha mostrato che si può costruire in montagna con modernità e rispetto.</p>
+        </div>
+        <div class="timeline" id="timeline">
+          <article class="tl"><span class="year">1909</span><h3 data-i18n="tl.1t">Abbazia</h3><p data-i18n="tl.1p">Nasce il 20 gennaio ad Abbazia, in Istria.</p></article>
+          <article class="tl"><span class="year">1947</span><h3 data-i18n="tl.2t">Cortina d'Ampezzo</h3><p data-i18n="tl.2p">Si stabilisce a Cortina, che diventa il suo luogo di vita e di lavoro.</p></article>
+          <article class="tl"><span class="year">1947–49</span><h3>Villa «Tabià del Bosco»</h3><p data-i18n="tl.3p">Tra le prime opere ampezzane, segnalate da Bruno Zevi già nel 1950.</p></article>
+          <article class="tl"><span class="year">1951–54</span><h3 data-i18n="tl.4t">Piano paesaggistico di Cortina</h3><p data-i18n="tl.4p">Con il piano nascono Palazzo della Telve, Residence Palace, Casa Menardi, la casa-studio Cà del Cembro.</p></article>
+          <article class="tl"><span class="year">1956</span><h3 data-i18n="tl.5t">Olimpiadi invernali</h3><p data-i18n="tl.5p">Interventi per i VII Giochi olimpici invernali di Cortina.</p></article>
+          <article class="tl"><span class="year">1954–63</span><h3 data-i18n="tl.6t">Villaggio ENI, Corte di Cadore</h3><p data-i18n="tl.6p">Per Enrico Mattei: 270 villette nel bosco, albergo, colonia, campeggio e la chiesa realizzata con Carlo Scarpa.</p></article>
+          <article class="tl"><span class="year" data-i18n="tl.7y">Oggi</span><h3 data-i18n="tl.7t">Lo studio continua</h3><p data-i18n="tl.7p">L'archivio è custodito dall'Archivio Progetti dell'Università IUAV di Venezia. Lo studio prosegue il lavoro in Via Menardi.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Services ============ -->
+    <section class="services" id="servizi">
+      <div class="wrap">
+        <p class="eyebrow reveal" data-i18n="srv.eyebrow">Servizi</p>
+        <h2 class="h2 reveal" data-i18n="srv.title">Un solo studio, dall'idea alle chiavi.</h2>
+        <div class="srv-grid">
+          <article class="srv reveal" data-tilt>
+            <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M6 56h52M12 56V30L32 12l20 18v26M26 56V40h12v16"/></svg>
+            <h3 data-i18n="srv.1t">Nuove costruzioni</h3><p data-i18n="srv.1p">Case unifamiliari e chalet, dal concept al collaudo.</p></article>
+          <article class="srv reveal" data-tilt>
+            <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M8 56h48M14 56V26h36v30M14 26l18-14 18 14M22 34h8v8h-8zM36 34h8v8h-8zM8 20l8 6M56 20l-8 6"/></svg>
+            <h3 data-i18n="srv.2t">Restauro e recupero</h3><p data-i18n="srv.2p">Tabià, fienili e case storiche: conservare il carattere, aggiornare il comfort.</p></article>
+          <article class="srv reveal" data-tilt>
+            <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M10 50h44M14 50V34h36v16M18 34v-8h28v8M22 50v6M42 50v6M30 20a4 4 0 1 0 0.1 0"/></svg>
+            <h3 data-i18n="srv.3t">Interni su misura</h3><p data-i18n="srv.3p">Arredi disegnati, falegnameria, luce: la casa fino all'ultimo dettaglio.</p></article>
+          <article class="srv reveal" data-tilt>
+            <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M6 50l14-22 10 12 8-10 20 20zM44 18a5 5 0 1 0 0.1 0"/></svg>
+            <h3 data-i18n="srv.4t">Paesaggio e urbanistica</h3><p data-i18n="srv.4p">Inserimento ambientale, piani attuativi, studi di fattibilità.</p></article>
+          <article class="srv reveal" data-tilt>
+            <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M12 54V14h28l12 12v28zM40 14v12h12M20 34h24M20 42h24M20 26h12"/></svg>
+            <h3 data-i18n="srv.5t">Pratiche e direzione lavori</h3><p data-i18n="srv.5p">Permessi, vincoli paesaggistici, sicurezza e cantiere.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Contact ============ -->
+    <section class="contact" id="contatti">
+      <div class="wrap grid-2">
+        <div>
+          <p class="eyebrow reveal" data-i18n="ct.eyebrow">Contatti</p>
+          <h2 class="h2 reveal" data-i18n="ct.title">Venite a trovarci a Cortina.</h2>
+          <address class="reveal">
+            Studio Gellner<br>Via Menardi 6<br>32043 Cortina d'Ampezzo (BL)<br>
+            <a href="https://maps.google.com/?q=Via+Menardi+6,+32043+Cortina+d%27Ampezzo" target="_blank" rel="noopener" data-i18n="ct.map">Apri la mappa →</a>
+          </address>
+        </div>
+        <form class="form reveal" id="contact-form" action="mailto:info@studiogellner.com" method="post" enctype="text/plain">
+          <label><span data-i18n="f.name">Nome e cognome</span><input name="nome" required autocomplete="name"></label>
+          <label><span data-i18n="f.mail">E-mail o telefono</span><input name="contatto" required></label>
+          <label><span data-i18n="f.type">Il progetto</span>
+            <select name="tipo"><option data-i18n="f.o1">Nuova casa</option><option data-i18n="f.o2">Restauro</option><option data-i18n="f.o3">Interni</option><option data-i18n="f.o4">Altro</option></select></label>
+          <label><span data-i18n="f.msg">Raccontateci</span><textarea name="messaggio" rows="4"></textarea></label>
+          <button class="btn" data-magnetic data-i18n="f.send">Invia</button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-row">
+      <span>© <span id="year"></span> Studio Gellner · Via Menardi 6, Cortina d'Ampezzo</span>
+      <a href="#top" data-i18n="footer.top">Torna su ↑</a>
+    </div>
+  </footer>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
