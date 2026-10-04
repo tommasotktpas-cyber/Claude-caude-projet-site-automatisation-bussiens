@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lumea — Réservez coiffeur, barbier, spa et institut en ligne</title>
+  <meta name="description" content="Trouvez et réservez en 30 secondes votre coiffeur, barbier, onglerie, spa ou institut de beauté. Disponibilités en temps réel, rappels automatiques, 100 % gratuit.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <span class="badge badge-brand">Nouveau · Liste d’attente intelligente</span>
+        <h1 style="margin-top:16px">Votre prochain rendez-vous beauté,<br><em>réservé en 30 secondes.</em></h1>
+        <p class="lead">Coiffeurs, barbiers, ongleries, spas et instituts. Disponibilités en temps réel, rappel la veille, et déplacement en un clic — sans appeler.</p>
+        <form class="searchbar" id="search-form" role="search">
+          <label class="seg"><span class="sr-only">Prestation ou salon</span><span data-icon="search"></span><input name="q" id="q" placeholder="Coupe, balayage, massage, salon…" autocomplete="off"></label>
+          <label class="seg"><span class="sr-only">Ville</span><span data-icon="pin"></span><select name="city" id="city"><option value="">Toutes les villes</option></select></label>
+          <button class="btn btn-brand btn-lg" type="submit">Rechercher</button>
+        </form>
+        <div class="trust" id="trust"></div>
+      </div>
+    </section>
+
+    <section class="container" id="salons" style="scroll-margin-top:80px">
+      <div class="row between" style="margin-bottom:8px">
+        <h2 style="margin:0">Salons à découvrir</h2>
+        <div class="row">
+          <label class="check small" style="margin:0"><input type="checkbox" id="open-now"> Ouvert maintenant</label>
+          <select id="sort" style="width:auto" aria-label="Trier">
+            <option value="rating">Mieux notés</option>
+            <option value="price">Prix croissant</option>
+            <option value="name">Nom</option>
+          </select>
+        </div>
+      </div>
+      <div class="cats" id="cats"></div>
+      <p class="muted small" id="result-count"></p>
+      <div class="salon-grid" id="results">
+        <div class="skeleton" style="height:300px"></div><div class="skeleton" style="height:300px"></div><div class="skeleton" style="height:300px"></div>
+      </div>
+    </section>
+
+    <section class="section container">
+      <div class="section-head">
+        <div class="eyebrow">Pourquoi Lumea</div>
+        <h2>Fini les appels pendant les heures d’ouverture.</h2>
+      </div>
+      <div class="features">
+        <div class="card feature"><div class="ico" data-icon="clock"></div><h3>Disponible 24/7</h3><p class="muted">Réservez à 23 h depuis votre canapé. Les créneaux affichés sont ceux de l’agenda réel du salon.</p></div>
+        <div class="card feature"><div class="ico" data-icon="bolt"></div><h3>Déplacez en 1 clic</h3><p class="muted">Un empêchement ? Changez d’horaire depuis le lien reçu par e-mail, sans compte et sans appeler.</p></div>
+        <div class="card feature"><div class="ico" data-icon="star"></div><h3>Avis 100 % vérifiés</h3><p class="muted">Seuls les clients venus au rendez-vous peuvent noter. Aucun faux avis possible.</p></div>
+        <div class="card feature"><div class="ico" data-icon="cal"></div><h3>Liste d’attente</h3><p class="muted">Tout est complet ? Inscrivez-vous : vous êtes prévenu dès qu’une place se libère.</p></div>
+      </div>
+    </section>
+
+    <section class="section container">
+      <div class="cta-band">
+        <div>
+          <div class="eyebrow">Vous êtes professionnel ?</div>
+          <h2 style="color:#fff">Remplissez votre agenda, sans payer de commission.</h2>
+          <p>Agenda, réservation en ligne, rappels SMS, acompte anti no-show et statistiques. Dès 24 € / mois, 30 jours offerts, sans engagement.</p>
+        </div>
+        <div class="row" style="justify-content:flex-end;position:relative;z-index:1">
+          <a href="/pro" class="btn btn-ghost btn-lg" style="color:#fff;border-color:#4a4556">Découvrir</a>
+          <a href="/connexion?pro=1" class="btn btn-accent btn-lg">Essai gratuit</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer id="site-footer"></footer>
+
+  <script src="/js/common.js"></script>
+  <script>
+    'use strict';
+    $$('[data-icon]').forEach((el) => { el.innerHTML = ICONS[el.dataset.icon]; });
+    mountChrome();
+
+    const params = new URLSearchParams(location.search);
+    const state = { q: params.get('q') || '', city: params.get('city') || '', category: params.get('category') || '', sort: 'rating', open: false };
+    $('#q').value = state.q;
+
+    function salonCard(s) {
+      const rating = s.rating ? `<span class="stars">★</span> <b>${s.rating.toFixed(1)}</b> <span class="muted">(${s.review_count})</span>` : '<span class="badge">Nouveau</span>';
+      return `
+        <a class="card card-hover salon-card" href="/salon.html?s=${encodeURIComponent(s.slug)}">
+          <div class="cover" style="--c:${esc(s.accent)};${s.cover_url ? `background-image:url('${esc(s.cover_url)}')` : ''}">
+            <span class="badge">${esc(CATEGORY_LABELS[s.category] || s.category)}</span>
+            ${s.cover_url ? '' : `<span class="initials">${esc(fmt.initials(s.name))}</span>`}
+          </div>
+          <div class="body">
+            <div class="row between"><h3>${esc(s.name)}</h3></div>
+            <div class="row small" style="gap:10px">${rating}<span class="muted">· ${esc(s.city)}</span>${s.open_now ? '<span class="badge badge-ok"><span class="dot"></span>Ouvert</span>' : ''}</div>
+            <div class="muted small">${s.min_price != null ? `À partir de <b style="color:var(--ink)">${fmt.eur(s.min_price)}</b>` : ''}${s.deposit_percent ? ' · Acompte sécurisé' : ''}</div>
+            <div class="tags">${s.top_services.map((t) => `<span class="badge">${esc(t)}</span>`).join('')}</div>
+          </div>
+        </a>`;
+    }
+
+    async function load() {
+      const qs = new URLSearchParams({ q: state.q, city: state.city, category: state.category, sort: state.sort, open: state.open ? '1' : '' });
+      const url = new URL(location.href);
+      ['q', 'city', 'category'].forEach((k) => (state[k] ? url.searchParams.set(k, state[k]) : url.searchParams.delete(k)));
+      history.replaceState(null, '', url);
+      try {
+        const salons = await api(`/api/public/salons?${qs}`);
+        $('#result-count').textContent = `${salons.length} établissement${salons.length > 1 ? 's' : ''}${state.city ? ` à ${state.city}` : ''}`;
+        $('#results').innerHTML = salons.length ? salons.map(salonCard).join('')
+          : '<div class="empty card" style="grid-column:1/-1">Aucun résultat. Essayez une autre ville ou un autre mot-clé.</div>';
+      } catch (err) {
+        $('#results').innerHTML = `<div class="empty card" style="grid-column:1/-1">${esc(err.message)}</div>`;
+      }
+    }
+
+    async function init() {
+      const meta = await api('/api/public/meta');
+      $('#city').innerHTML += meta.cities.map((c) => `<option ${c.city === state.city ? 'selected' : ''}>${esc(c.city)}</option>`).join('');
+      $('#cats').innerHTML = [{ category: '', n: 0 }, ...meta.categories]
+        .map((c) => `<button class="chip ${c.category === state.category ? 'active' : ''}" data-cat="${esc(c.category)}">${c.category ? esc(CATEGORY_LABELS[c.category] || c.category) : 'Tout'}</button>`).join('');
+      $('#trust').innerHTML = `
+        <div><b>${meta.stats.salons}</b>établissements partenaires</div>
+        <div><b>${meta.stats.bookings.toLocaleString('fr-FR')}</b>rendez-vous réservés</div>
+        <div><b>${meta.stats.rating ? `${meta.stats.rating.toFixed(1)}/5` : '—'}</b>note moyenne vérifiée</div>`;
+      load();
+    }
+
+    $('#cats').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-cat]');
+      if (!b) return;
+      state.category = b.dataset.cat;
+      $$('#cats .chip').forEach((c) => c.classList.toggle('active', c === b));
+      load();
+    });
+    $('#search-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      state.q = $('#q').value.trim();
+      state.city = $('#city').value;
+      load();
+      $('#salons').scrollIntoView({ behavior: 'smooth' });
+    });
+    $('#city').addEventListener('change', () => { state.city = $('#city').value; load(); });
+    $('#sort').addEventListener('change', () => { state.sort = $('#sort').value; load(); });
+    $('#open-now').addEventListener('change', (e) => { state.open = e.target.checked; load(); });
+    let t;
+    $('#q').addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { state.q = $('#q').value.trim(); load(); }, 300); });
+    init();
+  </script>
+</body>
+</html>

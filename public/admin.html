@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Administration — Lumea</title>
+  <meta name="robots" content="noindex">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+  <header id="site-header"></header>
+  <main class="container" style="padding-top:32px" id="page"></main>
+  <script src="/js/common.js"></script>
+  <script>
+    'use strict';
+    const PLAN_LABEL = { trial: 'Essai', starter: 'Solo', pro: 'Pro', business: 'Business' };
+    async function load() {
+      const d = await api('/api/admin/overview');
+      const k = d.kpis;
+      $('#page').innerHTML = `
+        <div class="page-head"><h1>Pilotage de la plateforme</h1><div class="grow"></div><button class="btn btn-ghost btn-sm" id="logout">Se déconnecter</button></div>
+        <div class="kpis">
+          <div class="kpi"><div class="label">MRR</div><div class="value">${k.mrr_eur.toLocaleString('fr-FR')} €</div><div class="sub">ARR ${(k.mrr_eur * 12).toLocaleString('fr-FR')} €</div></div>
+          <div class="kpi"><div class="label">Salons</div><div class="value">${k.salons}</div><div class="sub">${k.paying} payants · ${k.trials} en essai</div></div>
+          <div class="kpi"><div class="label">Conversion essai → payant</div><div class="value">${k.salons ? Math.round((k.paying / k.salons) * 100) : 0} %</div></div>
+          <div class="kpi"><div class="label">Réservations (30 j)</div><div class="value">${k.bookings_30d.toLocaleString('fr-FR')}</div></div>
+          <div class="kpi"><div class="label">Comptes clients</div><div class="value">${k.users}</div></div>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Salon</th><th>Ville</th><th>Propriétaire</th><th>Équipe</th><th>RDV</th><th>Formule</th><th>Visible</th><th></th></tr></thead>
+          <tbody>${d.salons.map((s) => `
+            <tr><td><b>${esc(s.name)}</b><div class="small muted">${esc(CATEGORY_LABELS[s.category] || s.category)} · créé le ${esc(s.created_at.slice(0, 10))}</div></td>
+              <td>${esc(s.city)}</td><td class="small">${esc(s.owner_email)}</td><td>${s.staff}</td><td>${s.bookings}</td>
+              <td><select data-plan="${s.id}" style="width:auto;padding:6px 8px">${Object.entries(PLAN_LABEL).map(([v, l]) => `<option value="${v}" ${v === s.plan ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
+              <td><input type="checkbox" data-pub="${s.id}" ${s.published ? 'checked' : ''} aria-label="Visible"></td>
+              <td style="white-space:nowrap"><a class="btn btn-ghost btn-sm" href="/salon.html?s=${encodeURIComponent(s.slug)}" target="_blank">Page</a> <a class="btn btn-ghost btn-sm" href="/app?salon=${s.id}">Back-office</a></td></tr>`).join('')}
+          </tbody></table></div>`;
+      $$('[data-plan]').forEach((el) => { el.onchange = () => api(`/api/admin/salons/${el.dataset.plan}`, { method: 'PATCH', body: { plan: el.value } }).then(() => { toast('Formule mise à jour.'); load(); }); });
+      $$('[data-pub]').forEach((el) => { el.onchange = () => api(`/api/admin/salons/${el.dataset.pub}`, { method: 'PATCH', body: { published: el.checked } }).then(() => toast('Visibilité mise à jour.')); });
+      $('#logout').onclick = async () => { await api('/api/auth/logout', { method: 'POST', body: {} }); location.href = '/'; };
+    }
+    mountChrome().then((u) => (u?.role === 'admin' ? load() : (location.href = '/connexion?next=/admin')));
+  </script>
+</body>
+</html>

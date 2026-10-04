@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Réserver en ligne — Lumea</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+  <header id="site-header"></header>
+  <main id="page">
+    <div class="salon-hero"><div class="cover skeleton" style="height:260px;border-radius:0"></div></div>
+  </main>
+  <footer id="site-footer"></footer>
+
+  <div class="drawer-backdrop" id="backdrop"></div>
+  <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+    <div class="drawer-head">
+      <button class="icon-btn" id="drawer-back" aria-label="Étape précédente">‹</button>
+      <div class="grow"><b id="drawer-title">Réservation</b><div class="small muted" id="drawer-sub"></div></div>
+      <button class="icon-btn" id="drawer-close" aria-label="Fermer">×</button>
+    </div>
+    <div class="drawer-body" id="drawer-body"></div>
+    <div class="drawer-foot hidden" id="drawer-foot"></div>
+  </aside>
+
+  <script src="/js/common.js"></script>
+  <script>
+    'use strict';
+    const params = new URLSearchParams(location.search);
+    const slug = params.get('s');
+    const embed = params.get('embed') === '1';
+    if (embed) document.body.classList.add('embed');
+
+    let data, user;
+    const bk = { step: 1, service: null, staff: null, date: null, time: null, slots: [], loadingSlots: false };
+
+    const hoursByDay = () => {
+      const m = {};
+      for (const h of data.hours) (m[h.weekday] ||= []).push(`${h.open.replace(':', 'h')} – ${h.close.replace(':', 'h')}`);
+      return m;
+    };
+
+    function render() {
+      const s = data.salon;
+      document.title = `${s.name} — Réserver en ligne | Lumea`;
+      const byDay = hoursByDay();
+      const todayWd = dateUtil.weekday(data.today);
+      const groups = {};
+      for (const sv of data.services) (groups[sv.category] ||= []).push(sv);
+      const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${s.address}, ${s.zip} ${s.city}`)}`;
+
+      $('#page').innerHTML = `
+        <div class="salon-hero"><div class="cover" style="--c:${esc(s.accent)};${s.cover_url ? `background-image:url('${esc(s.cover_url)}')` : ''}"></div></div>
+        <div class="container salon-layout">
+          <div>
+            <div class="salon-head">
+              <div class="row" style="gap:8px"><span class="badge badge-brand">${esc(CATEGORY_LABELS[s.category] || s.category)}</span>
+                ${s.deposit_percent ? `<span class="badge">Acompte ${s.deposit_percent} %</span>` : ''}
+                <span class="badge">Annulation gratuite jusqu’à ${s.cancel_hours} h avant</span></div>
+              <h1 style="font-size:clamp(1.8rem,4vw,2.6rem);margin:12px 0 6px">${esc(s.name)}</h1>
+              <div class="row small" style="gap:14px">
+                ${s.rating ? `<span><span class="stars">${fmt.stars(s.rating)}</span> <b>${s.rating.toFixed(1)}</b> <a href="#avis" class="muted">${s.review_count} avis vérifiés</a></span>` : '<span class="badge">Nouveau sur Lumea</span>'}
+                <a class="muted" href="${mapsUrl}" target="_blank" rel="noopener">${esc(s.address)}, ${esc(s.zip)} ${esc(s.city)}</a>
+              </div>
+              ${s.description ? `<p style="margin:14px 0 0;color:var(--ink-2)">${esc(s.description)}</p>` : ''}
+            </div>
+
+            <section style="margin-top:28px" aria-labelledby="h-services">
+              <h2 id="h-services" style="font-size:1.6rem">Choisissez votre prestation</h2>
+              ${Object.entries(groups).map(([cat, list]) => `
+                <div class="service-group"><h3>${esc(cat)}</h3><div class="card" style="padding:4px 20px">
+                  ${list.map((sv) => `
+                    <div class="service">
+                      <div class="info"><div class="name">${esc(sv.name)}</div>
+                        <div class="meta">${fmt.duration(sv.duration_min)}${sv.description ? ` · ${esc(sv.description)}` : ''}</div></div>
+                      <div class="price">${fmt.eur(sv.price_cents)}</div>
+                      <button class="btn btn-sm btn-brand" data-book="${sv.id}">Choisir</button>
+                    </div>`).join('')}
+                </div></div>`).join('') || '<p class="muted">Aucune prestation en ligne pour le moment.</p>'}
+            </section>
+
+            <section style="margin-top:36px" id="avis" aria-labelledby="h-reviews">
+              <h2 id="h-reviews" style="font-size:1.6rem">Avis clients ${s.rating ? `<span class="muted" style="font-family:var(--font);font-size:1rem">· ${s.rating.toFixed(1)}/5</span>` : ''}</h2>
+              <p class="small muted">Seuls les clients ayant honoré leur rendez-vous peuvent laisser un avis.</p>
+              <div class="card" style="padding:4px 20px">
+                ${data.reviews.map((r) => `
+                  <div class="review">
+                    <div class="row between"><b>${esc(r.author_name)}</b><span class="small muted">${fmt.date(r.created_at, { day: 'numeric', month: 'short', year: 'numeric' })}</span></div>
+                    <div class="stars small">${fmt.stars(r.rating)}</div>
+                    ${r.comment ? `<p style="margin:6px 0 0">${esc(r.comment)}</p>` : ''}
+                    ${r.reply ? `<div class="reply"><b>Réponse du salon :</b> ${esc(r.reply)}</div>` : ''}
+                  </div>`).join('') || '<div class="empty">Pas encore d’avis.</div>'}
+              </div>
+            </section>
+          </div>
+
+          <aside>
+            <div class="card side-card stack">
+              <button class="btn btn-brand btn-lg btn-block" data-book="">Prendre rendez-vous</button>
+              <div>
+                <h3 style="font-size:1rem;margin-top:8px">Horaires</h3>
+                <div class="hours-list">
+                  ${[1, 2, 3, 4, 5, 6, 0].map((wd) => `<span class="${wd === todayWd ? 'today' : ''}">${WEEKDAYS[wd]}</span><span class="${wd === todayWd ? 'today' : 'muted'}">${byDay[wd] ? byDay[wd].join(', ') : 'Fermé'}</span>`).join('')}
+                </div>
+              </div>
+              ${data.staff.length ? `<div><h3 style="font-size:1rem;margin-top:8px">L’équipe</h3><div class="team">
+                ${data.staff.map((p) => `<div class="row" style="gap:8px"><span class="avatar sm" style="--c:${esc(p.color)}">${esc(fmt.initials(p.name))}</span><div class="small"><b>${esc(p.name.split(' ')[0])}</b><div class="muted">${esc(p.title)}</div></div></div>`).join('')}
+              </div></div>` : ''}
+              <div class="small muted">${s.phone ? `Tél. <a href="tel:${esc(s.phone.replace(/\s/g, ''))}">${esc(s.phone)}</a>` : ''}</div>
+            </div>
+          </aside>
+        </div>`;
+    }
+
+    // ---------------- Booking drawer ----------------
+    const drawer = $('#drawer');
+    const openDrawer = () => { drawer.classList.add('open'); $('#backdrop').classList.add('open'); document.body.style.overflow = 'hidden'; };
+    const closeDrawer = () => { drawer.classList.remove('open'); $('#backdrop').classList.remove('open'); document.body.style.overflow = ''; };
+    $('#drawer-close').onclick = closeDrawer;
+    $('#backdrop').onclick = closeDrawer;
+    addEventListener('keydown', (e) => e.key === 'Escape' && closeDrawer());
+
+    const staffFor = (serviceId) => data.staff.filter((p) => p.service_ids.includes(serviceId));
+    const steps = () => (bk.service && staffFor(bk.service.id).length <= 1 ? [1, 3, 4] : [1, 2, 3, 4]);
+
+    function go(step) {
+      bk.step = step;
+      const list = steps();
+      $('#drawer-back').style.visibility = step > 1 && step < 5 ? 'visible' : 'hidden';
+      const progress = step === 5 ? '' : `<div class="steps">${list.map((n) => `<span class="${n <= step ? 'on' : ''}"></span>`).join('')}</div>`;
+      $('#drawer-foot').classList.add('hidden');
+      $('#drawer-sub').textContent = data.salon.name;
+      const body = $('#drawer-body');
+      if (step === 1) {
+        $('#drawer-title').textContent = 'Prestation';
+        body.innerHTML = progress + data.services.map((sv) => `
+          <button class="option ${bk.service?.id === sv.id ? 'selected' : ''}" data-service="${sv.id}">
+            <div class="grow"><b>${esc(sv.name)}</b><div class="small muted">${fmt.duration(sv.duration_min)} · ${esc(sv.category)}</div></div>
+            <b>${fmt.eur(sv.price_cents)}</b></button>`).join('');
+      } else if (step === 2) {
+        $('#drawer-title').textContent = 'Avec qui ?';
+        const list2 = staffFor(bk.service.id);
+        body.innerHTML = `${progress}
+          <button class="option ${bk.staff === null ? 'selected' : ''}" data-staff="">
+            <span class="avatar" style="--c:var(--ink)">✦</span><div class="grow"><b>Sans préférence</b><div class="small muted">Plus de créneaux disponibles</div></div></button>
+          ${list2.map((p) => `
+            <button class="option ${bk.staff === p.id ? 'selected' : ''}" data-staff="${p.id}">
+              <span class="avatar" style="--c:${esc(p.color)}">${esc(fmt.initials(p.name))}</span>
+              <div class="grow"><b>${esc(p.name)}</b><div class="small muted">${esc(p.title)}</div></div></button>`).join('')}`;
+      } else if (step === 3) {
+        $('#drawer-title').textContent = 'Date et heure';
+        renderDateStep(progress);
+      } else if (step === 4) {
+        $('#drawer-title').textContent = 'Vos coordonnées';
+        renderDetailsStep(progress);
+      }
+    }
+
+    $('#drawer-back').onclick = () => {
+      const list = steps();
+      const i = list.indexOf(bk.step);
+      if (i > 0) go(list[i - 1]);
+    };
+
+    $('#drawer-body').addEventListener('click', (e) => {
+      const sv = e.target.closest('[data-service]');
+      if (sv) {
+        bk.service = data.services.find((x) => x.id === Number(sv.dataset.service));
+        bk.staff = null; bk.time = null;
+        return go(staffFor(bk.service.id).length > 1 ? 2 : 3);
+      }
+      const st = e.target.closest('[data-staff]');
+      if (st) {
+        bk.staff = st.dataset.staff ? Number(st.dataset.staff) : null;
+        bk.time = null;
+        return go(3);
+      }
+      const day = e.target.closest('[data-day]');
+      if (day) { bk.date = day.dataset.day; bk.time = null; return loadSlots(); }
+      const slot = e.target.closest('[data-slot]');
+      if (slot) { bk.time = slot.dataset.slot; return go(4); }
+    });
+
+    function renderDateStep(progress) {
+      const openDays = new Set(data.hours.map((h) => h.weekday));
+      const max = Math.min(data.salon.max_days_ahead, 45);
+      const days = Array.from({ length: max }, (_, i) => dateUtil.addDays(data.today, i));
+      if (!bk.date) bk.date = days.find((d) => openDays.has(dateUtil.weekday(d))) || data.today;
+      $('#drawer-body').innerHTML = `${progress}
+        <div class="summary" style="margin-bottom:16px"><div><span>${esc(bk.service.name)}</span><b>${fmt.eur(bk.service.price_cents)}</b></div>
+          <div class="muted small"><span>${fmt.duration(bk.service.duration_min)}${bk.staff ? ` · avec ${esc(data.staff.find((p) => p.id === bk.staff).name)}` : ''}</span></div></div>
+        <div class="days" id="days">
+          ${days.map((d) => {
+            const dt = new Date(`${d}T12:00:00Z`);
+            return `<button class="day ${openDays.has(dateUtil.weekday(d)) ? '' : 'closed'} ${d === bk.date ? 'selected' : ''}" data-day="${d}">
+              <div class="dow">${dt.toLocaleDateString('fr-FR', { weekday: 'short', timeZone: 'UTC' }).replace('.', '')}</div>
+              <div class="num">${dt.getUTCDate()}</div><div class="mon">${dt.toLocaleDateString('fr-FR', { month: 'short', timeZone: 'UTC' }).replace('.', '')}</div></button>`;
+          }).join('')}
+        </div>
+        <div id="slots-area" style="margin-top:10px"></div>`;
+      $('.day.selected')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+      loadSlots();
+    }
+
+    async function loadSlots() {
+      $$('.day').forEach((d) => d.classList.toggle('selected', d.dataset.day === bk.date));
+      const area = $('#slots-area');
+      area.innerHTML = '<div class="slots">' + '<div class="skeleton" style="height:42px"></div>'.repeat(8) + '</div>';
+      const qs = new URLSearchParams({ service: bk.service.id, date: bk.date, staff: bk.staff || '' });
+      try {
+        const { slots, reason } = await api(`/api/public/salons/${encodeURIComponent(slug)}/slots?${qs}`);
+        const label = `<h3 style="font-size:1rem">${fmt.date(bk.date)}</h3>`;
+        if (slots.length) {
+          const parts = { Matin: [], 'Après-midi': [], Soir: [] };
+          for (const t of slots) parts[t < '12:00' ? 'Matin' : t < '17:00' ? 'Après-midi' : 'Soir'].push(t);
+          area.innerHTML = label + Object.entries(parts).filter(([, l]) => l.length).map(([k, l]) => `
+            <div class="small muted" style="margin:14px 0 8px;font-weight:600">${k}</div>
+            <div class="slots">${l.map((t) => `<button class="slot ${t === bk.time ? 'selected' : ''}" data-slot="${t}">${t.replace(':', 'h')}</button>`).join('')}</div>`).join('');
+        } else {
+          area.innerHTML = `${label}<div class="card center" style="padding:20px"><p class="muted" style="margin:0 0 12px">${esc(reason || 'Aucun créneau.')}</p><div id="next-days" class="row" style="justify-content:center"></div></div>
+            <div class="card" style="margin-top:14px"><b>Être prévenu si une place se libère ce jour-là</b>
+              <form id="waitlist-form" class="stack" style="margin-top:10px">
+                <div class="grid-2"><input name="name" placeholder="Votre nom" required value="${esc(user?.name || '')}"><input name="email" type="email" placeholder="E-mail" required value="${esc(user?.email || '')}"></div>
+                <button class="btn btn-ghost btn-block">Rejoindre la liste d’attente</button></form></div>`;
+          $('#waitlist-form').onsubmit = async (e) => {
+            e.preventDefault();
+            try {
+              await api(`/api/public/salons/${encodeURIComponent(slug)}/waitlist`, { method: 'POST', body: { ...formData(e.target), service_id: bk.service.id, date: bk.date } });
+              e.target.outerHTML = '<p class="badge badge-ok" style="margin-top:10px">C’est noté ! Vous recevrez un e-mail dès qu’une place se libère.</p>';
+            } catch (err) { toast(err.message, 'error'); }
+          };
+          const next = await api(`/api/public/salons/${encodeURIComponent(slug)}/next?${new URLSearchParams({ service: bk.service.id, staff: bk.staff || '', from: bk.date })}`);
+          $('#next-days').innerHTML = next.length
+            ? `<span class="small muted" style="width:100%">Prochaines disponibilités :</span>${next.map((n) => `<button class="chip" data-day="${n.date}">${fmt.date(n.date, { weekday: 'short', day: 'numeric', month: 'short' })} · ${n.first.replace(':', 'h')}</button>`).join('')}`
+            : '';
+        }
+      } catch (err) {
+        area.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
+      }
+    }
+
+    function renderDetailsStep(progress) {
+      const s = data.salon;
+      const deposit = Math.round((bk.service.price_cents * s.deposit_percent) / 100);
+      const staffName = bk.staff ? data.staff.find((p) => p.id === bk.staff).name : 'Premier disponible';
+      $('#drawer-body').innerHTML = `${progress}
+        <div class="summary" style="margin-bottom:18px">
+          <div><span>${esc(bk.service.name)}</span><b>${fmt.eur(bk.service.price_cents)}</b></div>
+          <div class="muted"><span>${fmt.date(bk.date)} à ${bk.time.replace(':', 'h')}</span><span>${fmt.duration(bk.service.duration_min)}</span></div>
+          <div class="muted"><span>Avec</span><span>${esc(staffName)}</span></div>
+          ${deposit ? `<div style="border-top:1px solid var(--line);margin-top:6px;padding-top:8px"><span>Acompte à régler maintenant</span><b>${fmt.eur(deposit)}</b></div>` : ''}
+        </div>
+        <form id="details-form" novalidate>
+          <div class="field"><label for="f-name">Nom complet</label><input id="f-name" name="name" required autocomplete="name" value="${esc(user?.name || '')}"></div>
+          <div class="grid-2">
+            <div class="field"><label for="f-email">E-mail</label><input id="f-email" name="email" type="email" required autocomplete="email" value="${esc(user?.email || '')}"></div>
+            <div class="field"><label for="f-phone">Téléphone <span class="muted">(rappel SMS)</span></label><input id="f-phone" name="phone" type="tel" autocomplete="tel" value="${esc(user?.phone || '')}"></div>
+          </div>
+          <div class="field"><label for="f-notes">Un mot pour le salon ? <span class="muted">(facultatif)</span></label><textarea id="f-notes" name="notes" placeholder="Allergies, longueur souhaitée, première visite…"></textarea></div>
+          <label class="check small"><input type="checkbox" name="marketing"> J’accepte de recevoir les offres de ${esc(s.name)} (désinscription en 1 clic).</label>
+          ${deposit ? `<div class="card" style="margin-top:14px;background:var(--surface-2);border:0"><b>Paiement sécurisé de l’acompte</b><p class="small muted" style="margin:6px 0 0">L’acompte est déduit du prix final. Remboursé si vous annulez plus de ${s.cancel_hours} h avant.</p></div>` : ''}
+          <p class="small muted" style="margin-top:14px">En confirmant, vous acceptez les <a href="/mentions#cgu" target="_blank">CGU</a>. Annulation gratuite jusqu’à ${s.cancel_hours} h avant le rendez-vous.</p>
+        </form>`;
+      const foot = $('#drawer-foot');
+      foot.classList.remove('hidden');
+      foot.innerHTML = `<button class="btn btn-brand btn-lg btn-block" id="confirm-btn">${deposit ? `Payer ${fmt.eur(deposit)} et confirmer` : 'Confirmer le rendez-vous'}</button>`;
+      $('#confirm-btn').onclick = submitBooking;
+    }
+
+    async function submitBooking() {
+      const form = $('#details-form');
+      const f = formData(form);
+      if (!f.name.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email)) {
+        toast('Merci de renseigner votre nom et un e-mail valide.', 'error');
+        return;
+      }
+      const btn = $('#confirm-btn');
+      btn.disabled = true;
+      btn.textContent = 'Confirmation…';
+      try {
+        const res = await api(`/api/public/salons/${encodeURIComponent(slug)}/bookings`, {
+          method: 'POST',
+          body: { service_id: bk.service.id, staff_id: bk.staff, date: bk.date, time: bk.time, source: embed ? 'widget' : 'online', customer: { ...f, marketing: !!f.marketing } },
+        });
+        showSuccess(res.token);
+      } catch (err) {
+        toast(err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Confirmer le rendez-vous';
+        if (err.status === 409) go(3);
+      }
+    }
+
+    function showSuccess(token) {
+      bk.step = 5;
+      $('#drawer-back').style.visibility = 'hidden';
+      $('#drawer-title').textContent = 'C’est réservé !';
+      $('#drawer-foot').classList.add('hidden');
+      $('#drawer-body').innerHTML = `
+        <div class="center"><div class="success-mark">✓</div>
+          <h2 style="font-size:1.6rem">Rendez-vous confirmé</h2>
+          <p class="muted">Un e-mail de confirmation vient de vous être envoyé. Vous recevrez un rappel la veille.</p></div>
+        <div class="summary" style="margin:18px 0">
+          <div><span>${esc(bk.service.name)}</span><b>${fmt.eur(bk.service.price_cents)}</b></div>
+          <div class="muted"><span>${fmt.date(bk.date)} à ${bk.time.replace(':', 'h')}</span></div>
+          <div class="muted"><span>${esc(data.salon.address)}, ${esc(data.salon.city)}</span></div>
+        </div>
+        <div class="stack">
+          <a class="btn btn-ghost btn-block" href="/api/public/bookings/${encodeURIComponent(token)}/ics">Ajouter à mon agenda</a>
+          <a class="btn btn-ghost btn-block" href="/rdv.html?t=${encodeURIComponent(token)}" target="${embed ? '_blank' : '_self'}">Gérer mon rendez-vous</a>
+          ${user ? '' : `<p class="small muted center">Créez un compte pour retrouver tous vos rendez-vous et cumuler des points fidélité. <a href="/connexion?register=1" target="${embed ? '_blank' : '_self'}">Créer mon compte</a></p>`}
+        </div>`;
+    }
+
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-book]');
+      if (!b || !data) return;
+      bk.date = null; bk.time = null; bk.staff = null;
+      if (b.dataset.book) {
+        bk.service = data.services.find((x) => x.id === Number(b.dataset.book));
+        go(staffFor(bk.service.id).length > 1 ? 2 : 3);
+      } else {
+        bk.service = null;
+        go(1);
+      }
+      openDrawer();
+    });
+
+    async function init() {
+      if (!embed) mountChrome().then((u) => { user = u; });
+      else api('/api/auth/me').then((r) => { user = r.user; }).catch(() => {});
+      if (!slug) { location.href = '/'; return; }
+      try {
+        data = await api(`/api/public/salons/${encodeURIComponent(slug)}`);
+      } catch (err) {
+        $('#page').innerHTML = `<div class="narrow empty" style="padding:120px 0"><h2>Salon introuvable</h2><p>${esc(err.message)}</p><a class="btn" href="/">Retour à l’accueil</a></div>`;
+        return;
+      }
+      document.documentElement.style.setProperty('--brand', data.salon.accent);
+      document.documentElement.style.setProperty('--brand-soft', `color-mix(in srgb, ${data.salon.accent} 14%, #fff)`);
+      render();
+      const pre = Number(params.get('service'));
+      if (pre && data.services.some((s) => s.id === pre)) {
+        bk.service = data.services.find((s) => s.id === pre);
+        if (params.get('date')) bk.date = params.get('date');
+        go(3);
+        openDrawer();
+      }
+    }
+    init();
+  </script>
+</body>
+</html>

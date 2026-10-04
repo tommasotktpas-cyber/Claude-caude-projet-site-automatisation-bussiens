@@ -1,0 +1,21 @@
+{
+  "name": "lumea",
+  "version": "1.0.0",
+  "description": "Lumea — plateforme de réservation et de gestion pour salons de coiffure, instituts de beauté et spas. 0 % de commission.",
+  "main": "server/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --no-warnings server/index.js",
+    "dev": "node --no-warnings --watch server/index.js",
+    "seed": "node --no-warnings server/seed.js --reset",
+    "test": "node --no-warnings --test tests/*.test.js"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}

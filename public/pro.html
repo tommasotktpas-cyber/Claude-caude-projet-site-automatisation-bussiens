@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lumea Pro — Logiciel de réservation pour salons, sans commission</title>
+  <meta name="description" content="Agenda en ligne, réservation 24/7, rappels SMS, acompte anti no-show, liste d'attente et statistiques. 0 % de commission. Dès 24 €/mois, 30 jours offerts.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+  <header id="site-header"></header>
+  <main>
+    <section class="hero">
+      <div class="container" style="display:grid;grid-template-columns:1.1fr 1fr;gap:40px;align-items:center" id="hero-grid">
+        <div>
+          <span class="badge badge-brand">Pour coiffeurs, barbiers, instituts, spas</span>
+          <h1 style="margin-top:16px">Un agenda plein.<br><em>Zéro commission.</em></h1>
+          <p class="lead">Lumea remplace le téléphone, le carnet papier et les plateformes qui prélèvent 20 à 25 % sur vos nouveaux clients. Vous gardez 100 % de votre chiffre d’affaires.</p>
+          <div class="row" style="margin-top:24px">
+            <a href="/connexion?pro=1" class="btn btn-brand btn-lg">Démarrer l’essai gratuit</a>
+            <a href="#demo" class="btn btn-ghost btn-lg">Voir la démo</a>
+          </div>
+          <p class="small muted" style="margin-top:12px">30 jours offerts · Sans carte bancaire · Sans engagement · Import de vos clients inclus</p>
+        </div>
+        <div class="card" style="padding:18px;box-shadow:var(--shadow-lg)" aria-hidden="true">
+          <div class="row between" style="margin-bottom:12px"><b>Aujourd’hui</b><span class="badge badge-ok">+3 réservations en ligne</span></div>
+          <div class="kpis" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
+            <div class="kpi"><div class="label">CA du mois</div><div class="value" style="font-size:1.4rem">8 420 €</div></div>
+            <div class="kpi"><div class="label">Remplissage</div><div class="value" style="font-size:1.4rem">87 %</div></div>
+            <div class="kpi"><div class="label">No-show</div><div class="value" style="font-size:1.4rem">1,2 %</div></div>
+          </div>
+          <div class="appt" style="position:relative;--c:#7c3aed;margin-bottom:8px;left:0;right:0"><b>09:00 · Julie M.</b>Balayage naturel · Camille</div>
+          <div class="appt" style="position:relative;--c:#0ea5e9;margin-bottom:8px;left:0;right:0"><b>10:30 · Thomas L.</b>Coupe homme · Hugo</div>
+          <div class="appt" style="position:relative;--c:#f97316;left:0;right:0"><b>11:15 · Sarah K.</b>Soin kératine · Inès <span class="badge badge-ok" style="float:right">Acompte payé</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section container">
+      <div class="section-head"><div class="eyebrow">Tout-en-un</div><h2>Tout ce qu’il faut pour gérer votre salon. Rien de superflu.</h2></div>
+      <div class="features">
+        <div class="card feature"><div class="ico" data-icon="cal"></div><h3>Agenda multi-collaborateurs</h3><p class="muted">Vue jour par collaborateur, horaires individuels, congés, temps de battement entre deux clients. Synchronisé avec Google / Apple Calendar.</p></div>
+        <div class="card feature"><div class="ico" data-icon="clock"></div><h3>Réservation en ligne 24/7</h3><p class="muted">Votre page salon + un widget à coller sur votre site, Instagram ou Google. Seuls les vrais créneaux libres sont proposés.</p></div>
+        <div class="card feature"><div class="ico" data-icon="card"></div><h3>Acompte anti no-show</h3><p class="muted">Demandez 10 à 50 % à la réservation. Les absences chutent, et le créneau perdu est quand même payé.</p></div>
+        <div class="card feature"><div class="ico" data-icon="bolt"></div><h3>Automatisations</h3><p class="muted">Confirmation, rappel 24 h avant (e-mail + SMS), demande d’avis après la visite, alerte liste d’attente. Webhooks vers Zapier, Make, n8n.</p></div>
+        <div class="card feature"><div class="ico" data-icon="users"></div><h3>Fichier clients (CRM)</h3><p class="muted">Historique, dépenses, absences, notes techniques (couleur, allergies). Export CSV en un clic, conforme RGPD.</p></div>
+        <div class="card feature"><div class="ico" data-icon="star"></div><h3>Avis vérifiés & fidélité</h3><p class="muted">Avis uniquement après une vraie visite, réponse publique, et points fidélité crédités automatiquement.</p></div>
+      </div>
+    </section>
+
+    <section class="section container" id="comparatif">
+      <div class="section-head"><div class="eyebrow">Comparatif</div><h2>Pourquoi les salons passent à Lumea</h2>
+        <p class="muted">Comparaison avec les modèles du marché (marketplaces à commission et logiciels de caisse traditionnels), selon leurs grilles publiques.</p></div>
+      <div class="table-wrap">
+        <table class="compare">
+          <thead><tr><th></th><th class="us">Lumea</th><th>Marketplaces beauté</th><th>Logiciels traditionnels</th></tr></thead>
+          <tbody>
+            <tr><td>Commission sur nouveaux clients</td><td class="us yes">0 %</td><td class="no">20 – 25 %</td><td>0 %</td></tr>
+            <tr><td>Abonnement mensuel</td><td class="us">dès 24 €</td><td>dès 0 – 30 €</td><td>50 – 200 €</td></tr>
+            <tr><td>Engagement</td><td class="us yes">Aucun</td><td>Variable</td><td class="no">12 mois fréquent</td></tr>
+            <tr><td>Acompte / empreinte anti no-show</td><td class="us yes">✓</td><td class="yes">✓</td><td>Option payante</td></tr>
+            <tr><td>Liste d’attente automatique</td><td class="us yes">✓</td><td class="no">—</td><td class="no">—</td></tr>
+            <tr><td>Déplacement client en 1 clic (sans compte)</td><td class="us yes">✓</td><td>Avec compte</td><td class="no">—</td></tr>
+            <tr><td>Vos clients restent vos clients</td><td class="us yes">✓</td><td class="no">Mis en avant chez les concurrents</td><td class="yes">✓</td></tr>
+            <tr><td>Webhooks / automatisations ouvertes</td><td class="us yes">✓</td><td class="no">—</td><td>Rare</td></tr>
+            <tr><td>Mise en route</td><td class="us yes">10 minutes</td><td>1 – 2 jours</td><td>Formation requise</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card" style="margin-top:18px" id="calc">
+        <div class="row between"><div><h3 style="margin:0">Combien vous coûte une commission de 25 % ?</h3><p class="muted small" style="margin:4px 0 0">Déplacez le curseur : nouveaux clients par mois via une marketplace.</p></div>
+          <b class="display" style="font-size:2rem;color:var(--danger)" id="calc-out">—</b></div>
+        <div class="grid-2" style="margin-top:12px;align-items:end">
+          <div><label for="calc-n">Nouveaux clients / mois : <span id="calc-n-v">20</span></label><input type="range" id="calc-n" min="5" max="120" value="20" style="padding:0"></div>
+          <div><label for="calc-t">Ticket moyen : <span id="calc-t-v">60</span> €</label><input type="range" id="calc-t" min="20" max="200" value="60" step="5" style="padding:0"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section container" id="tarifs" style="scroll-margin-top:80px">
+      <div class="section-head center" style="margin-inline:auto"><div class="eyebrow">Tarifs</div><h2>Simple, transparent, sans commission.</h2><p class="muted">Tous les prix HT, par établissement. Changez de formule à tout moment.</p></div>
+      <div class="pricing" id="plans"></div>
+    </section>
+
+    <section class="section container" id="demo">
+      <div class="cta-band">
+        <div><div class="eyebrow">Démo en direct</div><h2 style="color:#fff">Testez l’espace pro tout de suite.</h2>
+          <p>Connectez-vous au salon de démonstration « Maison Céleste » : agenda rempli, statistiques, CRM, automatisations.</p>
+          <p style="font-family:monospace;color:#fff">demo@lumea.app · demo1234</p></div>
+        <div class="row" style="justify-content:flex-end;position:relative;z-index:1">
+          <button class="btn btn-accent btn-lg" id="demo-login">Ouvrir la démo</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="section narrow">
+      <h2 class="center">Questions fréquentes</h2>
+      <details class="faq"><summary>Prenez-vous une commission sur les réservations ?</summary><p>Non, jamais. Vous payez un abonnement fixe, que vous ayez 10 ou 1 000 réservations dans le mois. Les clients trouvés via la marketplace Lumea sont aussi sans commission.</p></details>
+      <details class="faq"><summary>Puis-je importer mes clients existants ?</summary><p>Oui. Envoyez-nous votre fichier (Excel, CSV ou export de votre logiciel actuel), nous l’importons gratuitement sous 48 h.</p></details>
+      <details class="faq"><summary>Comment fonctionne l’acompte ?</summary><p>Vous choisissez un pourcentage (par exemple 20 %). Le client le règle à la réservation ; il est déduit du prix final et remboursé si l’annulation respecte votre délai.</p></details>
+      <details class="faq"><summary>Les SMS de rappel sont-ils inclus ?</summary><p>Les e-mails sont illimités. Les SMS sont envoyés via votre fournisseur (Twilio, Brevo…) connecté par webhook, au prix coûtant de l’opérateur.</p></details>
+      <details class="faq"><summary>Et si je veux arrêter ?</summary><p>Vous résiliez en un clic, sans frais. Vous exportez vos clients et votre historique à tout moment.</p></details>
+      <details class="faq"><summary>Mes données sont-elles protégées ?</summary><p>Hébergement en Europe, mots de passe chiffrés (scrypt), données clients jamais revendues ni utilisées pour promouvoir d’autres salons.</p></details>
+    </section>
+  </main>
+  <footer id="site-footer"></footer>
+  <script src="/js/common.js"></script>
+  <script>
+    'use strict';
+    $$('[data-icon]').forEach((el) => { el.innerHTML = ICONS[el.dataset.icon]; });
+    mountChrome();
+    if (matchMedia('(max-width: 900px)').matches) $('#hero-grid').style.gridTemplateColumns = '1fr';
+
+    api('/api/plans').then((plans) => {
+      $('#plans').innerHTML = plans.map((p) => `
+        <div class="card pad-lg plan ${p.popular ? 'popular' : ''}">
+          ${p.popular ? '<span class="ribbon">Le plus choisi</span>' : ''}
+          <h3>${esc(p.name)}</h3>
+          <div><span class="price">${p.price_eur} €</span><span class="muted"> / mois</span></div>
+          <p class="muted small" style="margin:4px 0 0">${p.max_staff ? `${p.max_staff === 1 ? '1 collaborateur' : `Jusqu’à ${p.max_staff} collaborateurs`}` : 'Collaborateurs illimités'}</p>
+          <ul>${p.features.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>
+          <a class="btn ${p.popular ? 'btn-brand' : 'btn-ghost'} btn-block" href="/connexion?pro=1&plan=${p.id}">Essayer 30 jours gratuits</a>
+        </div>`).join('');
+    });
+
+    function calc() {
+      const n = Number($('#calc-n').value);
+      const t = Number($('#calc-t').value);
+      $('#calc-n-v').textContent = n;
+      $('#calc-t-v').textContent = t;
+      $('#calc-out').textContent = `${Math.round(n * t * 0.25 * 12).toLocaleString('fr-FR')} € / an`;
+    }
+    $('#calc-n').oninput = calc;
+    $('#calc-t').oninput = calc;
+    calc();
+
+    $('#demo-login').onclick = async () => {
+      try {
+        await api('/api/auth/login', { method: 'POST', body: { email: 'demo@lumea.app', password: 'demo1234' } });
+        location.href = '/app';
+      } catch (err) { toast(err.message, 'error'); }
+    };
+  </script>
+</body>
+</html>

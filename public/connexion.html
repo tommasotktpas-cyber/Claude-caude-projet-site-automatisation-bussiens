@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connexion — Lumea</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+  <header id="site-header"></header>
+  <main class="narrow" style="max-width:520px;padding-top:48px">
+    <div class="card pad-lg">
+      <div class="row" style="gap:6px;margin-bottom:22px" role="tablist">
+        <button class="chip active" data-tab="login" role="tab">Se connecter</button>
+        <button class="chip" data-tab="register" role="tab">Créer un compte</button>
+        <button class="chip" data-tab="pro" role="tab">Je suis un pro</button>
+      </div>
+
+      <form id="form-login" data-pane="login">
+        <h1 style="font-size:1.8rem">Bon retour 👋</h1>
+        <div class="field"><label for="l-email">E-mail</label><input id="l-email" name="email" type="email" required autocomplete="email"></div>
+        <div class="field"><label for="l-pass">Mot de passe</label><input id="l-pass" name="password" type="password" required autocomplete="current-password"></div>
+        <button class="btn btn-brand btn-block btn-lg">Se connecter</button>
+        <p class="small muted center" style="margin-top:14px">Démo pro : demo@lumea.app / demo1234</p>
+      </form>
+
+      <form id="form-register" data-pane="register" class="hidden">
+        <h1 style="font-size:1.8rem">Créer mon compte</h1>
+        <p class="muted small">Retrouvez tous vos rendez-vous et cumulez des points fidélité. Vos réservations passées avec le même e-mail sont rattachées automatiquement.</p>
+        <div class="field"><label for="r-name">Nom complet</label><input id="r-name" name="name" required autocomplete="name"></div>
+        <div class="grid-2">
+          <div class="field"><label for="r-email">E-mail</label><input id="r-email" name="email" type="email" required autocomplete="email"></div>
+          <div class="field"><label for="r-phone">Téléphone</label><input id="r-phone" name="phone" type="tel" autocomplete="tel"></div>
+        </div>
+        <div class="field"><label for="r-pass">Mot de passe</label><input id="r-pass" name="password" type="password" required minlength="8" autocomplete="new-password"><div class="hint">8 caractères minimum.</div></div>
+        <button class="btn btn-brand btn-block btn-lg">Créer mon compte</button>
+      </form>
+
+      <form id="form-pro" data-pane="pro" class="hidden">
+        <h1 style="font-size:1.8rem">Lancez votre salon sur Lumea</h1>
+        <p class="muted small">30 jours gratuits, sans carte bancaire. Votre page de réservation est en ligne dans 2 minutes.</p>
+        <div class="field"><label for="p-salon">Nom de l’établissement</label><input id="p-salon" name="salon_name" required></div>
+        <div class="grid-2">
+          <div class="field"><label for="p-cat">Activité</label>
+            <select id="p-cat" name="category"><option value="coiffure">Coiffure</option><option value="barbier">Barbier</option><option value="esthetique">Esthétique</option><option value="ongles">Ongles</option><option value="spa">Spa</option><option value="massage">Massage</option></select></div>
+          <div class="field"><label for="p-city">Ville</label><input id="p-city" name="city" required></div>
+        </div>
+        <div class="grid-2">
+          <div class="field"><label for="p-name">Votre nom</label><input id="p-name" name="name" required autocomplete="name"></div>
+          <div class="field"><label for="p-phone">Téléphone</label><input id="p-phone" name="phone" type="tel" autocomplete="tel"></div>
+        </div>
+        <div class="field"><label for="p-email">E-mail professionnel</label><input id="p-email" name="email" type="email" required autocomplete="email"></div>
+        <div class="field"><label for="p-pass">Mot de passe</label><input id="p-pass" name="password" type="password" required minlength="8" autocomplete="new-password"></div>
+        <button class="btn btn-brand btn-block btn-lg">Créer mon salon</button>
+        <p class="small muted center" style="margin-top:12px">En continuant, vous acceptez les <a href="/mentions#cgu">CGU</a>.</p>
+      </form>
+    </div>
+  </main>
+  <footer id="site-footer"></footer>
+  <script src="/js/common.js"></script>
+  <script>
+    'use strict';
+    mountChrome().then((u) => { if (u) location.href = u.role === 'pro' ? '/app' : u.role === 'admin' ? '/admin' : '/compte'; });
+    const params = new URLSearchParams(location.search);
+    function tab(name) {
+      $$('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+      $$('[data-pane]').forEach((p) => p.classList.toggle('hidden', p.dataset.pane !== name));
+    }
+    $$('[data-tab]').forEach((b) => b.addEventListener('click', () => tab(b.dataset.tab)));
+    if (params.get('pro')) tab('pro');
+    else if (params.get('register')) tab('register');
+
+    const redirect = (role) => { location.href = params.get('next') || (role === 'pro' ? '/app' : role === 'admin' ? '/admin' : '/compte'); };
+    const bind = (id, url) => $(id).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = e.target.querySelector('button[type="submit"], button:not([type])');
+      btn.disabled = true;
+      try {
+        const res = await api(url, { method: 'POST', body: formData(e.target) });
+        redirect(res.role);
+      } catch (err) {
+        toast(err.message, 'error');
+        btn.disabled = false;
+      }
+    });
+    bind('#form-login', '/api/auth/login');
+    bind('#form-register', '/api/auth/register');
+    bind('#form-pro', '/api/auth/register-pro');
+  </script>
+</body>
+</html>

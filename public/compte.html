@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mon compte — Lumea</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+  <header id="site-header"></header>
+  <main class="narrow" style="padding-top:40px" id="page"></main>
+  <footer id="site-footer"></footer>
+  <script src="/js/common.js"></script>
+  <script>
+    'use strict';
+    (async () => {
+      const user = await mountChrome();
+      if (!user) { location.href = '/connexion?next=/compte'; return; }
+      const list = await api('/api/auth/my-bookings');
+      const now = new Date().toISOString().slice(0, 16);
+      const upcoming = list.filter((b) => b.status === 'confirmed' && b.start_at >= now).reverse();
+      const past = list.filter((b) => !(b.status === 'confirmed' && b.start_at >= now));
+      const row = (b) => `
+        <a class="list-item" href="/rdv.html?t=${encodeURIComponent(b.token)}" style="text-decoration:none">
+          <div class="grow"><b>${esc(b.service_name)}</b> <span class="muted">· ${esc(b.salon_name)}</span>
+            <div class="small muted">${fmt.dateTime(b.start_at)} · avec ${esc(b.staff_name)}</div></div>
+          <span class="badge ${STATUS[b.status].cls}">${STATUS[b.status].label}</span></a>`;
+      $('#page').innerHTML = `
+        <div class="row between"><h1 style="font-size:2rem;margin:0">Bonjour ${esc(user.name.split(' ')[0])}</h1><button class="btn btn-ghost btn-sm" id="logout">Se déconnecter</button></div>
+        <div class="kpis" style="margin-top:20px">
+          <div class="kpi"><div class="label">Points fidélité</div><div class="value">${user.loyalty_points}</div><div class="sub">1 point par euro dépensé</div></div>
+          <div class="kpi"><div class="label">Rendez-vous à venir</div><div class="value">${upcoming.length}</div></div>
+          <div class="kpi"><div class="label">Visites</div><div class="value">${list.filter((b) => b.status === 'completed').length}</div></div>
+        </div>
+        <div class="card"><h3>À venir</h3>${upcoming.map(row).join('') || '<div class="empty">Aucun rendez-vous prévu. <a href="/">Trouver un salon</a></div>'}</div>
+        <div class="card" style="margin-top:16px"><h3>Historique</h3>${past.map(row).join('') || '<div class="empty">Pas encore d’historique.</div>'}</div>`;
+      $('#logout').onclick = async () => { await api('/api/auth/logout', { method: 'POST', body: {} }); location.href = '/'; };
+    })();
+  </script>
+</body>
+</html>
