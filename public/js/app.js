@@ -44,7 +44,7 @@ const staffById = (id) => ctx.staff.find((s) => s.id === id);
 // =====================================================================
 async function renderDashboard() {
   const days = Number(sessionStorage.getItem('lumea_days') || 30);
-  const [st, ag] = await Promise.all([api(P(`/stats?days=${days}`)), api(P('/agenda'))]);
+  const [st, ag, br] = await Promise.all([api(P(`/stats?days=${days}`)), api(P('/agenda')), api(P('/brief'))]);
   const max = Math.max(1, ...st.daily.map((d) => d.revenue_cents));
   const byDay = Object.fromEntries(st.daily.map((d) => [d.day, d]));
   const bars = Array.from({ length: st.days }, (_, i) => {
@@ -73,11 +73,21 @@ async function renderDashboard() {
     </div>
     <div class="two-col">
       <div class="card"><div class="row between"><h3 style="margin:0">Chiffre d’affaires par jour</h3><span class="small muted">${st.rating.avg ? `★ ${st.rating.avg} (${st.rating.n} avis)` : ''}</span></div><div class="bars">${bars}</div></div>
-      <div class="card"><div class="row between"><h3 style="margin:0">Aujourd’hui</h3><a href="#agenda" class="small">Agenda →</a></div>
-        ${todays.map((b) => `<div class="list-item" data-booking="${b.id}" style="cursor:pointer">
-          <span class="avatar sm" style="--c:${esc(b.staff_color)}">${esc(fmt.initials(b.staff_name))}</span>
-          <div class="grow"><b>${b.start_at.slice(11, 16)}</b> · ${esc(b.client_name)}<div class="small muted">${esc(b.service_name)}</div></div>
-          <span class="badge ${STATUS[b.status].cls}">${STATUS[b.status].label}</span></div>`).join('') || '<div class="empty">Aucun rendez-vous aujourd’hui.</div>'}
+      <div class="card"><div class="row between"><h3 style="margin:0">Votre journée</h3><span class="row" style="gap:10px"><button class="link small" id="brief-ai">Résumé IA</button><a href="#agenda" class="small">Agenda →</a></span></div>
+        <p class="small muted" style="margin:4px 0 8px">${br.count ? `${br.count} client${br.count > 1 ? 's' : ''} de ${br.first} à ${br.last} · ${fmt.eur(br.expected_cents)} prévus` : 'Aucun rendez-vous aujourd’hui.'}</p>
+        <div class="note-box" id="brief-intro" hidden style="margin-bottom:8px"></div>
+        ${br.to_handle?.length ? `<a href="#messages" class="note-box" style="display:block;margin-bottom:8px;background:var(--warn-soft)"><b>${br.to_handle.length} demande(s) à rappeler</b> : ${esc(br.to_handle[0].customer_name || br.to_handle[0].customer_phone || 'client')} — ${esc(br.to_handle[0].outcome.replace(/^Message : /, ''))}</a>` : ''}
+        ${br.mail?.filter((m) => m.priority === 'haute').length ? `<a href="#emails" class="note-box" style="display:block;margin-bottom:8px"><b>E-mails urgents</b> : ${br.mail.filter((m) => m.priority === 'haute').map((m) => esc(m.summary || m.subject)).join(' · ')}</a>` : ''}
+        ${br.bookings.map((x) => { const b = todays.find((t) => t.id === x.id) || {}; return `<div class="list-item" data-booking="${x.id}" style="cursor:pointer;align-items:flex-start">
+          <span class="avatar sm" style="--c:${esc(b.staff_color || '#999')}">${esc(fmt.initials(x.staff))}</span>
+          <div class="grow"><b>${x.time}</b> · ${esc(x.client)}<div class="small muted">${esc(x.service)} · ${esc(x.staff)}</div>
+            ${x.style ? `<div class="small">✂️ ${esc(x.style)}</div>` : ''}${x.notes ? `<div class="small">📝 ${esc(x.notes)}</div>` : ''}
+            ${x.flags.length ? `<div class="row" style="gap:4px;margin-top:3px;flex-wrap:wrap">${x.flags.map((f) => `<span class="badge ${/anniversaire|nouveau/.test(f) ? 'badge-brand' : /absence/.test(f) ? 'badge-warn' : ''}">${esc(f)}</span>`).join('')}</div>` : ''}</div>
+          ${b.status ? `<span class="badge ${STATUS[b.status].cls}">${STATUS[b.status].label}</span>` : ''}</div>`; }).join('')}
+        <div class="row small" style="gap:8px;margin-top:10px;flex-wrap:nowrap"><input type="checkbox" id="brief-mail" ${br.settings.daily_report_enabled ? 'checked' : ''} style="width:auto">
+          <label for="brief-mail" class="grow">Point du matin par e-mail à</label>
+          <select id="brief-hour" style="width:auto;padding:2px 6px">${[5, 6, 7, 8, 9, 10].map((h) => `<option value="${h}" ${h === br.settings.daily_report_hour ? 'selected' : ''}>${h} h</option>`).join('')}</select></div>
+        <div class="small muted">Chaque collaborateur reçoit aussi sa propre journée.</div>
       </div>
     </div>
     <div class="two-col" style="margin-top:18px">
@@ -90,9 +100,21 @@ async function renderDashboard() {
       </div>
     </div>`;
   $('#period').onchange = (e) => { sessionStorage.setItem('lumea_days', e.target.value); renderDashboard(); };
+  const saveBrief = () => api(P('/brief/settings'), { method: 'PUT', body: { daily_report_enabled: $('#brief-mail').checked, daily_report_hour: $('#brief-hour').value } }).then(() => toast('Rapport du matin enregistré.'));
+  $('#brief-mail').onchange = saveBrief;
+  $('#brief-hour').onchange = saveBrief;
+  $('#brief-ai').onclick = async (e) => {
+    e.target.disabled = true;
+    const box = $('#brief-intro');
+    box.hidden = false;
+    box.textContent = 'Préparation du résumé…';
+    const r = await api(P('/brief?intro=1')).catch((err) => ({ intro: err.message }));
+    box.textContent = r.intro || 'Résumé IA indisponible : ajoutez la clé ANTHROPIC_API_KEY sur le serveur.';
+    e.target.disabled = false;
+  };
   $('#quick-book').onclick = () => bookingForm({ date: ctx.today });
   view.querySelectorAll('[data-booking]').forEach((el) => {
-    el.onclick = () => bookingDetail(todays.find((b) => b.id === Number(el.dataset.booking)), renderDashboard);
+    el.onclick = () => { const b = todays.find((x) => x.id === Number(el.dataset.booking)); if (b) bookingDetail(b, renderDashboard); };
   });
 }
 

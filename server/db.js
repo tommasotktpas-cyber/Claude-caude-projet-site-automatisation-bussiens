@@ -423,6 +423,10 @@ CREATE INDEX IF NOT EXISTS idx_ai_conv_salon ON ai_conversations (salon_id, upda
 addColumn('ai_conversations', 'human_mode', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('ai_conversations', 'unread', 'INTEGER NOT NULL DEFAULT 0');
 
+// Morning briefing e-mail.
+addColumn('salons', 'daily_report_enabled', 'INTEGER NOT NULL DEFAULT 1');
+addColumn('salons', 'daily_report_hour', 'INTEGER NOT NULL DEFAULT 7');
+addColumn('salons', 'daily_report_sent_on', "TEXT NOT NULL DEFAULT ''");
 // Invoicing & bookkeeping.
 addColumn('salons', 'legal_name', "TEXT NOT NULL DEFAULT ''");
 addColumn('salons', 'vat_number', "TEXT NOT NULL DEFAULT ''");

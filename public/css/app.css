@@ -382,3 +382,5 @@ body.in-modal .drawer-backdrop { background: transparent; }
 .bubble.from-assistant, .bubble.from-team { align-self: flex-start; border-bottom-left-radius: 4px; }
 .bubble.from-team { background: var(--ok-soft); }
 .bubble.typing { opacity: .6; }
+a.note-box { text-decoration: none; color: inherit; }
+a.note-box:hover { filter: brightness(.97); }

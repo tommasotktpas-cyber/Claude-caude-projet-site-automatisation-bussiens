@@ -155,7 +155,7 @@ function seed() {
       const email = idx === 0 ? 'demo@lumea.app' : `pro${idx}@lumea.app`;
       const ownerId = Number(run("INSERT INTO users (email, password_hash, name, role) VALUES (?,?,?, 'pro')", email, demoPassword, def.staff[0].name).lastInsertRowid);
       const salon = createSalon(ownerId, { ...def, email });
-      run('UPDATE salons SET plan = ? WHERE id = ?', def.plan, salon.id);
+      run('UPDATE salons SET plan = ?, daily_report_sent_on = ? WHERE id = ?', def.plan, today, salon.id); // no e-mail burst on first start
       if (def.license) {
         run('INSERT INTO template_licenses (salon_id, template, billing, price_chf) VALUES (?,?,?,?)', salon.id, def.template, def.license, TEMPLATE_PRICING[def.license]);
       }

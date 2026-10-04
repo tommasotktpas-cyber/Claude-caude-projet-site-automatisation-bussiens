@@ -150,6 +150,7 @@ if (require.main === module) {
   setInterval(() => {
     try { runAutomations(); } catch (err) { console.error('[automations]', err); }
   }, 60 * 1000).unref();
+  setInterval(() => require('./report').runDailyReports().catch((err) => console.error('[report]', err)), 5 * 60 * 1000).unref();
   setInterval(() => require('./mail').syncAll().catch((err) => console.error('[mail]', err)), 10 * 60 * 1000).unref();
 }
 

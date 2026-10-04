@@ -21,7 +21,7 @@ router.use(requireRole('pro', 'admin', 'staff'));
 const STAFF_ALLOWED = [
   ['GET', /^\/(salon|staff|services|agenda|slots|clients(\/\d+)?|bookings\/\d+\/style|products|sales|gift-cards\/[\w-]+)$/],
   ['POST', /^\/(bookings|sales|me\/time-off)$/],
-  ['GET', /^\/(earnings|me)$/],
+  ['GET', /^\/(earnings|me|brief)$/],
   ['PUT', /^\/me\/hours$/],
   ['DELETE', /^\/me\/time-off\/\d+$/],
   ['PATCH', /^\/bookings\/\d+$/],
@@ -1167,6 +1167,24 @@ router.get('/export/journal.csv', (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="journal-${from}-${to}.csv"`);
   res.send(require('../accounting').journalCsv(req.salon, from, to));
+});
+
+// ---------- Morning briefing ----------
+
+router.get('/brief', async (req, res) => {
+  const report = require('../report');
+  const date = T.isDate(req.query.date) ? req.query.date : T.now().date;
+  const b = report.brief(req.salon, date, req.staffId || null);
+  const withIntro = req.query.intro === '1' && !req.staffId;
+  res.json({ ...b, intro: withIntro ? await report.intro(b) : '', settings: { daily_report_enabled: req.salon.daily_report_enabled, daily_report_hour: req.salon.daily_report_hour } });
+});
+
+router.put('/brief/settings', (req, res) => {
+  const b = req.body || {};
+  run('UPDATE salons SET daily_report_enabled = ?, daily_report_hour = ? WHERE id = ?',
+    b.daily_report_enabled === undefined ? req.salon.daily_report_enabled : (b.daily_report_enabled ? 1 : 0),
+    int(b.daily_report_hour, 4, 12, req.salon.daily_report_hour), req.salon.id);
+  res.json({ ok: true });
 });
 
 module.exports = router;
