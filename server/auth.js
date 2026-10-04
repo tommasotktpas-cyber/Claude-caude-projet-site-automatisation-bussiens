@@ -105,9 +105,13 @@ function rateLimit(bucket, max, windowMs) {
   };
 }
 
+/** Unsubscribe link token for a client (no login, cannot be guessed). */
+const unsubscribeToken = (clientId) => `${clientId}.${sign(`unsub:${clientId}`).slice(0, 22)}`;
+const readUnsubscribeToken = (t) => { const [id, sig] = String(t).split('.'); return id && sig === sign(`unsub:${id}`).slice(0, 22) ? Number(id) : null; };
+
 const randomToken = (bytes = 18) => crypto.randomBytes(bytes).toString('base64url');
 
 module.exports = {
   hashPassword, verifyPassword, setSession, clearSession, sessionMiddleware,
-  requireRole, rateLimit, randomToken, createSessionToken, readSessionToken,
+  requireRole, rateLimit, randomToken, unsubscribeToken, readUnsubscribeToken, createSessionToken, readSessionToken,
 };

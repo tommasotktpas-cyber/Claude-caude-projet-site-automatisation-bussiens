@@ -316,6 +316,7 @@ function seed() {
 
     // Past visits are considered already followed up (no burst of "time to rebook" e-mails on first start).
     run('UPDATE bookings SET rebook_sent = 1 WHERE start_at < ?', `${today}T00:00`);
+    run('UPDATE clients SET winback_sent_at = ?', today); // no win-back burst on a fresh demo
     for (const c of all('SELECT id FROM clients')) {
       if (rand() < 0.6) run('UPDATE clients SET birthday = ? WHERE id = ?', `${String(1 + Math.floor(rand() * 12)).padStart(2, '0')}-${String(1 + Math.floor(rand() * 28)).padStart(2, '0')}`, c.id);
     }

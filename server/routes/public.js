@@ -376,4 +376,13 @@ router.post('/salons/:slug/contact', rateLimit('contact', 5, 10 * 60 * 1000), (r
   res.status(201).json({ ok: true });
 });
 
+// One-click unsubscribe from a salon's offers (link in marketing e-mails).
+router.get('/unsubscribe/:token', (req, res) => {
+  const id = require('../auth').readUnsubscribeToken(req.params.token);
+  const c = id && one('SELECT c.id, s.name FROM clients c JOIN salons s ON s.id = c.salon_id WHERE c.id = ?', id);
+  if (c) run('UPDATE clients SET marketing_opt_in = 0 WHERE id = ?', c.id);
+  res.type('html').send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Désinscription</title>
+<p style="font-family:system-ui;padding:40px;max-width:520px;margin:auto">${c ? `C’est fait : vous ne recevrez plus d’offres de ${String(c.name).replace(/[<>&]/g, '')}. Les messages liés à vos rendez-vous continuent normalement.` : 'Lien invalide.'}</p>`);
+});
+
 module.exports = router;

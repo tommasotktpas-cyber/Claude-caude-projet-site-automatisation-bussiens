@@ -425,6 +425,11 @@ addColumn('ai_conversations', 'unread', 'INTEGER NOT NULL DEFAULT 0');
 
 // Two-way SMS: the client answers the reminder with 1 (confirm) or 2 (cancel).
 addColumn('bookings', 'client_confirmed', 'INTEGER NOT NULL DEFAULT 0');
+// Win back clients who have not come back for a while.
+addColumn('salons', 'winback_days', 'INTEGER NOT NULL DEFAULT 90');
+addColumn('salons', 'winback_offer', "TEXT NOT NULL DEFAULT '-10 % sur votre prochaine visite'");
+addColumn('salons', 'winback_enabled', 'INTEGER NOT NULL DEFAULT 1');
+addColumn('clients', 'winback_sent_at', "TEXT NOT NULL DEFAULT ''");
 // Morning briefing e-mail.
 addColumn('salons', 'daily_report_enabled', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('salons', 'daily_report_hour', 'INTEGER NOT NULL DEFAULT 7');

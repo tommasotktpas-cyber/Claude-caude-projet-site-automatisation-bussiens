@@ -104,7 +104,7 @@ router.put('/salon', (req, res) => {
   if (name.length < 2) throw new HttpError(400, 'Nom trop court.');
   run(
     `UPDATE salons SET name=?, category=?, description=?, address=?, city=?, zip=?, phone=?, email=?, cover_url=?, accent=?,
-       deposit_percent=?, cancel_hours=?, buffer_min=?, slot_step=?, min_notice_min=?, max_days_ahead=?, loyalty_enabled=?, published=?, giftcards_enabled=?, lastminute_percent=?, lastminute_hours=?, birthday_offer=?
+       deposit_percent=?, cancel_hours=?, buffer_min=?, slot_step=?, min_notice_min=?, max_days_ahead=?, loyalty_enabled=?, published=?, giftcards_enabled=?, lastminute_percent=?, lastminute_hours=?, birthday_offer=?, winback_enabled=?, winback_days=?, winback_offer=?
      WHERE id=?`,
     name,
     CATEGORIES.includes(b.category) ? b.category : s.category,
@@ -120,6 +120,9 @@ router.put('/salon', (req, res) => {
     b.giftcards_enabled === undefined ? s.giftcards_enabled : (b.giftcards_enabled ? 1 : 0),
     int(b.lastminute_percent, 0, 50, s.lastminute_percent), int(b.lastminute_hours, 1, 72, s.lastminute_hours),
     b.birthday_offer === undefined ? s.birthday_offer : clean(b.birthday_offer, 160),
+    b.winback_enabled === undefined ? s.winback_enabled : (b.winback_enabled ? 1 : 0),
+    int(b.winback_days, 30, 365, s.winback_days),
+    b.winback_offer === undefined ? s.winback_offer : clean(b.winback_offer, 160),
     s.id,
   );
   res.json({ ok: true });
@@ -577,6 +580,17 @@ router.put('/reviews/:id/reply', (req, res) => {
 
 router.get('/notifications', (req, res) => {
   res.json(all('SELECT * FROM notifications WHERE salon_id = ? ORDER BY id DESC LIMIT 100', req.salon.id));
+});
+
+router.get('/winback/stats', (req, res) => {
+  const r = one(
+    `SELECT COUNT(DISTINCT c.id) AS sent,
+            COUNT(DISTINCT b.client_id) AS returned,
+            COALESCE(SUM(b.price_cents), 0) AS revenue_cents
+     FROM clients c LEFT JOIN bookings b ON b.client_id = c.id AND b.status IN ('confirmed','completed') AND substr(b.created_at, 1, 10) >= c.winback_sent_at
+     WHERE c.salon_id = ? AND c.winback_sent_at != '' AND c.winback_sent_at >= date('now', '-365 days')`, req.salon.id,
+  );
+  res.json(r);
 });
 
 router.post('/automations/run', (_req, res) => res.json(runAutomations()));

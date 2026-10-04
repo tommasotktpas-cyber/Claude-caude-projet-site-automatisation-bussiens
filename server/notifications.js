@@ -131,7 +131,7 @@ function runAutomations() {
     run('UPDATE bookings SET review_requested = 1 WHERE id = ?', id);
     notify('review', id);
   }
-  return { reminders: due.length, reviews: done.length, rebooks: runRebookReminders(now), birthdays: runBirthdays(now) };
+  return { reminders: due.length, reviews: done.length, rebooks: runRebookReminders(now), birthdays: runBirthdays(now), winbacks: runWinback(now) };
 }
 
 /** "Time for your next cut": X weeks after a completed visit, if the client has nothing booked since. */
@@ -177,4 +177,44 @@ function runBirthdays(now) {
   return rows.length;
 }
 
-module.exports = { notify, notifyWaitlist, runAutomations, APP_URL, euros, frDate };
+/**
+ * "We miss you": clients whose last visit is older than the salon's threshold (90 days by default), with nothing booked,
+ * who accepted offers, get one message with the salon's offer — at most every 6 months, from 10:00.
+ */
+function runWinback(now) {
+  if (now.min < 10 * 60) return 0;
+  const rows = all(
+    `SELECT c.id, c.name, c.email, c.salon_id, s.name AS salon_name, s.slug, s.email AS salon_email, s.winback_offer, s.winback_days, MAX(b.start_at) AS last_visit
+     FROM clients c JOIN salons s ON s.id = c.salon_id JOIN bookings b ON b.client_id = c.id AND b.status = 'completed'
+     WHERE s.winback_enabled = 1 AND c.marketing_opt_in = 1 AND c.email != '' AND c.email NOT LIKE '%.invalid'
+       AND (c.winback_sent_at = '' OR c.winback_sent_at < date(?, '-180 days'))
+       AND NOT EXISTS (SELECT 1 FROM bookings f WHERE f.client_id = c.id AND f.status = 'confirmed')
+     GROUP BY c.id
+     HAVING substr(last_visit, 1, 10) <= date(?, '-' || s.winback_days || ' days') AND substr(last_visit, 1, 10) >= date(?, '-365 days')
+     LIMIT 200`, now.date, now.date, now.date,
+  );
+  const { unsubscribeToken } = require('./auth');
+  for (const c of rows) {
+    run('UPDATE clients SET winback_sent_at = ? WHERE id = ?', now.date, c.id);
+    const first = c.name.split(' ')[0];
+    const subject = `${first}, vous nous manquez chez ${c.salon_name}`;
+    const body = `Bonjour ${first},
+
+Cela fait un moment que nous ne vous avons pas vu(e) chez ${c.salon_name} !`
+      + `${c.winback_offer ? `
+Pour votre retour : ${c.winback_offer}.` : ''}
+
+Réservez en 30 secondes : ${APP_URL}/salon.html?s=${c.slug}
+
+À très vite,
+${c.salon_name}`
+      + `
+
+Ne plus recevoir nos offres : ${APP_URL}/api/public/unsubscribe/${unsubscribeToken(c.id)}`;
+    const info = run("INSERT INTO notifications (salon_id, kind, channel, recipient, subject, body) VALUES (?, 'winback', 'email', ?,?,?)", c.salon_id, c.email, subject, body);
+    deliver(info.lastInsertRowid, { kind: 'winback', channel: 'email', to: c.email, subject, body, salon_id: c.salon_id, fromName: c.salon_name, replyTo: c.salon_email || undefined });
+  }
+  return rows.length;
+}
+
+module.exports = { notify, notifyWaitlist, runAutomations, runWinback, APP_URL, euros, frDate };

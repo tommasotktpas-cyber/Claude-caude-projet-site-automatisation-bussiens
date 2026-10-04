@@ -709,8 +709,8 @@ async function renderReviews() {
 // Automations
 // =====================================================================
 async function renderAutomations() {
-  const [notifs, waitlist] = await Promise.all([api(P('/notifications')), api(P('/waitlist'))]);
-  const KIND = { rebook: 'Rappel retour', birthday: 'Anniversaire', gift_card: 'Carte cadeau', staff_invite: 'Invitation employé', confirmation: 'Confirmation', reminder: 'Rappel J-1', rescheduled: 'Déplacement', cancelled: 'Annulation', review: 'Demande d’avis', new_booking_pro: 'Alerte salon', waitlist: 'Liste d’attente' };
+  const [notifs, waitlist, wb] = await Promise.all([api(P('/notifications')), api(P('/waitlist')), api(P('/winback/stats'))]);
+  const KIND = { winback: 'Relance client inactif', daily_report: 'Point du matin', invoice: 'Facture', contact: 'Formulaire de contact', ai_message: 'Message IA', rebook: 'Rappel retour', birthday: 'Anniversaire', gift_card: 'Carte cadeau', staff_invite: 'Invitation employé', confirmation: 'Confirmation', reminder: 'Rappel J-1', rescheduled: 'Déplacement', cancelled: 'Annulation', review: 'Demande d’avis', new_booking_pro: 'Alerte salon', waitlist: 'Liste d’attente' };
   const flows = [
     ['Confirmation instantanée', 'E-mail (+ SMS) au client dès la réservation, avec lien pour gérer et fichier agenda.'],
     ['Rappel 24 h avant', 'Réduit les absences de 60 à 80 %. Lien de déplacement en 1 clic inclus.'],
@@ -718,6 +718,7 @@ async function renderAutomations() {
     ['Liste d’attente', 'Dès qu’un créneau se libère, les clients inscrits pour ce jour sont prévenus.'],
     ['Alerte nouvelle réservation', 'Vous êtes notifié à chaque réservation en ligne.'],
     ['C’est l’heure de revenir', 'Après une coupe, une couleur ou des ongles, le client reçoit un rappel au bon moment (réglable par prestation) s’il n’a rien réservé.'],
+    ['Clients perdus de vue', ctx.salon.winback_enabled ? `Après ${ctx.salon.winback_days} jours sans visite : « ${esc(ctx.salon.winback_offer || 'Vous nous manquez')} ». ${wb.sent} relancé(s) sur 12 mois, <b>${wb.returned} revenu(s)</b> · ${fmt.eur(wb.revenue_cents)} de CA récupéré.` : 'Désactivé (Paramètres).'],
     ['Anniversaire', `Message avec votre cadeau le jour J${ctx.salon.birthday_offer ? ` : « ${esc(ctx.salon.birthday_offer)} »` : ' (désactivé dans Paramètres)'}.`],
     ['Dernière minute', ctx.salon.lastminute_percent ? `−${ctx.salon.lastminute_percent} % automatique sur les créneaux libres dans les ${ctx.salon.lastminute_hours} h.` : 'Désactivé : réglez un pourcentage dans Paramètres pour remplir les trous de l’agenda.'],
     ['Fidélité', `1 point par franc crédité au client à l’encaissement${ctx.salon.loyalty_enabled ? '' : ' (désactivé dans Paramètres)'}.`],
@@ -777,6 +778,10 @@ async function renderSettings() {
           <div class="field"><label>… dans les prochaines (heures)</label><input name="lastminute_hours" type="number" min="1" max="72" value="${s.lastminute_hours}"></div>
         </div>
         <div class="field"><label>Cadeau d’anniversaire envoyé aux clients</label><input name="birthday_offer" value="${esc(s.birthday_offer)}" placeholder="-15 % sur votre prochaine prestation"><div class="hint">E-mail envoyé le jour de l’anniversaire du client. Laisser vide pour désactiver.</div></div>
+        <label class="check"><input type="checkbox" name="winback_enabled" ${s.winback_enabled ? 'checked' : ''}> Relancer les clients qui ne sont pas revenus depuis</label>
+        <div class="grid-2"><div class="field"><label>… jours</label><input name="winback_days" type="number" min="30" max="365" value="${s.winback_days}"></div>
+          <div class="field"><label>Offre de retour</label><input name="winback_offer" value="${esc(s.winback_offer)}" placeholder="-10 % sur votre prochaine visite"></div></div>
+        <div class="hint" style="margin-top:-6px;margin-bottom:10px">Uniquement aux clients ayant accepté vos offres, une fois tous les 6 mois au plus, avec lien de désinscription.</div>
         <label class="check"><input type="checkbox" name="giftcards_enabled" ${s.giftcards_enabled ? 'checked' : ''}> Vendre des cartes cadeaux en ligne</label>
         <label class="check"><input type="checkbox" name="loyalty_enabled" ${s.loyalty_enabled ? 'checked' : ''}> Programme de fidélité (1 point par franc)</label>
         <label class="check"><input type="checkbox" name="published" ${s.published ? 'checked' : ''}> Page visible sur la marketplace Lumea</label>
@@ -799,6 +804,7 @@ async function renderSettings() {
     f.loyalty_enabled = !!f.loyalty_enabled;
     f.published = !!f.published;
     f.giftcards_enabled = !!f.giftcards_enabled;
+    f.winback_enabled = !!f.winback_enabled;
     try { await api(P('/salon'), { method: 'PUT', body: f }); toast('Paramètres enregistrés.'); await refreshCtx(); } catch (err) { toast(err.message, 'error'); }
   };
   api(P('/studio')).then((st) => {
