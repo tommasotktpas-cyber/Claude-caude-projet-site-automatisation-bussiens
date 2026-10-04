@@ -141,6 +141,7 @@ async function mountChrome() {
         <nav class="nav" aria-label="Navigation principale">
           <a href="/#salons" class="hide-sm">Trouver un salon</a>
           <a href="/pro" class="hide-sm">Lumea Pro</a>
+          <button class="btn btn-sm btn-ghost" data-install-app hidden>Installer l’app</button>
           <span id="nav-session"><a href="/connexion" class="btn btn-sm btn-ghost">Se connecter</a></span>
         </nav>
       </div>`;
@@ -184,3 +185,22 @@ function scaleThumbs(root = document) {
   const ro = new ResizeObserver((entries) => entries.forEach((e) => apply(e.target)));
   root.querySelectorAll('.tpl-thumb').forEach((b) => { apply(b); ro.observe(b); });
 }
+
+// Installable app (PWA): register the service worker, offer "install" where the browser supports it.
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+let deferredInstall = null;
+addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstall = e;
+  document.querySelectorAll('[data-install-app]').forEach((b) => { b.hidden = false; });
+});
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-install-app]');
+  if (!b || !deferredInstall) return;
+  deferredInstall.prompt();
+  await deferredInstall.userChoice.catch(() => {});
+  deferredInstall = null;
+  b.hidden = true;
+});

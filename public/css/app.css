@@ -45,7 +45,7 @@ small, .small { font-size: .85rem; }
 .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .between { justify-content: space-between; }
 .grow { flex: 1; }
-.hidden { display: none !important; }
+.hidden, [hidden] { display: none !important; }
 .center { text-align: center; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
