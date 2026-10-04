@@ -34,6 +34,7 @@
 #lm-chat input{flex:1;border:1px solid #ddd;border-radius:10px;padding:10px 12px;font:inherit;min-width:0}
 #lm-chat form button{border:0;border-radius:10px;background:${color};color:#fff;padding:0 14px;font:inherit;font-weight:600;cursor:pointer}
 ${me.dataset.offset ? '@media(max-width:760px){#lm-chat{bottom:86px}}' : ''}
+@media(max-width:760px){#lm-chat .lm-fab{width:50px;height:50px}#lm-chat{right:12px}}
 #lm-chat .lm-note{font-size:.75rem;color:#7a7486;text-align:center;padding:0 10px 8px}`;
   const style = document.createElement('style');
   style.textContent = css;

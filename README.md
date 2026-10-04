@@ -67,6 +67,11 @@ Dans l'espace pro, **Mon site** permet de : choisir et prévisualiser tous les m
 | **E-mails** | *E-mails* | Connexion Gmail / Outlook en lecture seule ; chaque e-mail est classé (clients, factures, fournisseurs, administration, pub), résumé en une phrase avec l'action à faire. La pub disparaît, une facture reçue devient une dépense en un clic. |
 | **Comptabilité** | *Comptabilité* | Factures numérotées (TVA 8.1 %, IBAN, PDF, envoi par e-mail, depuis la caisse), dépenses, résultat mois par mois (part des indépendants et loyers de fauteuil, commissions), TVA collectée / déductible / due, export pour la fiduciaire. |
 | **Point du matin** | E-mail + tableau de bord | « Aujourd'hui vous avez 6 clients » : qui, quoi, avec qui, coupe choisie en 3D, notes, nouveaux clients, anniversaires, appels à rappeler, e-mails urgents, factures en retard, stock bas. Chaque collaborateur reçoit sa propre journée. |
+| **SMS 1 / 2** | Rappel J-1 | Le client répond 1 pour confirmer, 2 pour annuler : le créneau est libéré et la liste d'attente prévenue (Twilio). |
+| **QR-facture suisse** | Factures | Section paiement SIX v2.3 (référence RF ou QRR) imprimée sous chaque facture ouverte. |
+| **Clients perdus de vue** | *Paramètres*, *Automatisations* | Relance avec offre après 90 jours sans visite (clients consentants, désinscription en un clic), résultats mesurés. |
+| **Parrainage** | *Abonnement* | 60 jours d'essai pour le salon parrainé, 1 mois offert au parrain dès que le filleul s'abonne. |
+| **Application mobile** | PWA | Installable aujourd'hui ; publication Play Store / App Store via PWABuilder (voir DEPLOIEMENT.md). |
 | **Rémunérations** | *Rémunérations* | Salarié, pourcentage ou location de fauteuil (indépendant) : calcul automatique de ce qui revient à chacun. |
 
 L'IA utilise Claude (`server/ai.js`, modèle `claude-opus-5-5`, variable `ANTHROPIC_API_KEY`). Le repli automatique côté serveur est activé : si une demande est refusée par le modèle principal, l'API la reprend avec un autre modèle adapté dans le même appel.

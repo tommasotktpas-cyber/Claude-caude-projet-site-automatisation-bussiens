@@ -427,7 +427,7 @@
       if (!embed) {
         // Chat with the salon (its AI assistant, or the team).
         const chat = Object.assign(document.createElement('script'), { src: '/js/chat-widget.js', defer: true });
-        Object.assign(chat.dataset, { salon: data.salon.slug, color: accent, name: data.salon.name, offset: '1' });
+        Object.assign(chat.dataset, { salon: data.salon.slug, color: accent, name: data.salon.name });
         document.body.appendChild(chat);
       }
       const pre = Number(params.get('service'));

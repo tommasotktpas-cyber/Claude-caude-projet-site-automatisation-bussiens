@@ -79,6 +79,13 @@ function createApp() {
   });
   app.get('/api/templates', (_req, res) => res.json(sites.templateCatalog(null)));
 
+  // Android app (Trusted Web Activity from PWABuilder): proves the app and the site belong together.
+  app.get('/.well-known/assetlinks.json', (_req, res) => {
+    const pkg = process.env.ANDROID_PACKAGE;
+    const fingerprints = String(process.env.ANDROID_SHA256 || '').split(',').map((f) => f.trim()).filter(Boolean);
+    if (!pkg || !fingerprints.length) return res.status(404).json([]);
+    res.json([{ relation: ['delegate_permission/common.handle_all_urls'], target: { namespace: 'android_app', package_name: pkg, sha256_cert_fingerprints: fingerprints } }]);
+  });
   app.get('/api/health', (_req, res) => res.json({ ok: true, now: T.now().iso }));
   // Caddy "on-demand TLS" asks here before issuing a certificate: only for our domain and salons' custom domains.
   app.get('/api/internal/domain-check', (req, res) => {

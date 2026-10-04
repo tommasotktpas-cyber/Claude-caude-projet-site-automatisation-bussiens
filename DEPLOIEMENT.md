@@ -65,3 +65,14 @@ Chaque fonction se désactive proprement tant que sa clé est absente (mode dém
 - **Gmail** : l’accès en lecture est un scope « restreint ». Jusqu’à 100 comptes de test, il fonctionne tout de suite ; au-delà, Google exige une vérification de l’application avec un audit de sécurité annuel payant (plusieurs milliers de dollars). Outlook n’a pas cette contrainte. Prévoyez l’audit Gmail quand vous aurez assez de salons clients.
 - **Assistant téléphonique** : coût par appel = minutes Twilio + reconnaissance vocale + appels à l’IA (quelques centimes à quelques dizaines de centimes par appel selon la durée). Facturez-le dans l’abonnement Premium ou en option.
 - **Sécurité** : changez `ADMIN_PASSWORD` avant le premier démarrage, gardez `.env` hors de Git, activez la double authentification chez Stripe, Twilio et votre hébergeur.
+
+## Application mobile (Play Store et App Store)
+
+Lumea est déjà une application installable (PWA) : sur iPhone, « Partager › Sur l’écran d’accueil » ; sur Android, « Installer l’application ». Pour être présent dans les stores sans réécrire l’application :
+
+1. Mettez le site en ligne en HTTPS (étapes ci-dessus).
+2. Ouvrez **[pwabuilder.com](https://www.pwabuilder.com)**, saisissez `https://lumea.ch` : le manifeste, les icônes et les captures d’écran sont reconnus.
+3. **Android** : « Package for stores › Android ». Vous obtenez un `.aab` à déposer sur la Google Play Console (compte développeur : 25 USD, une fois). Renseignez ensuite dans `.env` :
+   `ANDROID_PACKAGE=ch.lumea.app` et `ANDROID_SHA256=<empreinte de la clé, fournie par PWABuilder ou la Play Console>`, puis redémarrez : `/.well-known/assetlinks.json` prouve à Android que l’application et le site vont ensemble (plein écran, sans barre d’adresse).
+4. **iPhone** : « Package for stores › iOS ». Il faut un Mac avec Xcode et un compte Apple Developer (99 USD par an) ; Apple refuse parfois les applications qui ne sont « qu’un site » : mettez en avant l’espace pro (agenda, caisse, notifications) dans la fiche.
+5. Chaque mise à jour du site met à jour l’application automatiquement : pas de nouvelle version à publier pour une correction.
