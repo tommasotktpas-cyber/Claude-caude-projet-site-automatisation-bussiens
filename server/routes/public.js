@@ -351,4 +351,29 @@ router.get('/salons/:slug/chat/:session', (req, res) => {
   res.json({ messages: chatLog(conv), human: !!(conv?.human_mode || !salon.ai_chat_enabled || !require('../ai').enabled()) });
 });
 
+// Contact form of the salon's website: lands in « Messages » (to handle) and in the salon's inbox.
+router.post('/salons/:slug/contact', rateLimit('contact', 5, 10 * 60 * 1000), (req, res) => {
+  const salon = salonBySlug(req.params.slug);
+  const b = req.body || {};
+  if (b.website) return res.json({ ok: true }); // honeypot: bots fill every field
+  const name = clean(b.name, 120);
+  const contact = clean(b.phone || b.email, 160);
+  const message = clean(b.message, 2000);
+  if (!name || !contact || message.length < 3) throw new HttpError(400, 'Merci d’indiquer votre nom, un moyen de vous joindre et votre message.');
+  const isEmail = EMAIL_RE.test(contact);
+  const now = T.now().iso;
+  run(
+    `INSERT INTO ai_conversations (salon_id, channel, external_id, customer_name, customer_phone, transcript, outcome, status, unread, human_mode)
+     VALUES (?, 'chat', ?, ?, ?, ?, ?, 'to_handle', 1, 1)`,
+    salon.id, `contact-${randomToken(9)}`, name, contact, JSON.stringify([{ from: 'client', text: message, at: now }]),
+    `Formulaire de contact${isEmail ? ` (${contact})` : ''} : ${message.slice(0, 200)}`,
+  );
+  if (salon.email) {
+    const body = `${name} (${contact}) vous a écrit depuis votre site :\n\n${message}\n\nRépondez directement ${isEmail ? 'par e-mail' : 'par téléphone'}. Message aussi disponible dans Lumea › Messages.`;
+    run("INSERT INTO notifications (salon_id, kind, channel, recipient, subject, body) VALUES (?, 'contact', 'email', ?, ?, ?)", salon.id, salon.email, `Nouveau message de ${name}`, body);
+    require('../mailer').send({ channel: 'email', to: salon.email, subject: `Nouveau message de ${name}`, body, fromName: 'Lumea', replyTo: isEmail ? contact : undefined }).catch(() => {});
+  }
+  res.status(201).json({ ok: true });
+});
+
 module.exports = router;

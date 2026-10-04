@@ -916,7 +916,7 @@ const ACCESS_LABEL = {
   free: ['Inclus', 'badge-ok'], included: ['Inclus Premium', 'badge-ok'], trial: ['Inclus pendant l’essai', 'badge-brand'],
   licensed: ['Débloqué', 'badge-ok'], locked: ['Premium', ''],
 };
-const SECTION_LABELS = { about: 'À propos', services: 'Prestations & tarifs', team: 'Équipe', gallery: 'Galerie photos', reviews: 'Avis clients', infos: 'Horaires & accès' };
+const SECTION_LABELS = { about: 'À propos', services: 'Prestations & tarifs', team: 'Équipe', gallery: 'Galerie photos', reviews: 'Avis clients', faq: 'Questions fréquentes', infos: 'Horaires & accès', contact: 'Formulaire de contact' };
 
 async function renderSiteEditor() {
   const d = await api(P('/site'));
@@ -1014,6 +1014,12 @@ async function buyLicense(template, billing) {
   renderSiteEditor();
 }
 
+const SECTION_DEFAULT_ORDER = Object.keys(SECTION_LABELS);
+const sectionOrderOf = (c) => {
+  const list = (Array.isArray(c.order) ? c.order : []).filter((k, i, a) => SECTION_LABELS[k] && a.indexOf(k) === i);
+  return [...list, ...SECTION_DEFAULT_ORDER.filter((k) => !list.includes(k))];
+};
+
 function renderSitePanel() {
   const { draft, data } = siteState;
   const c = draft.content;
@@ -1069,13 +1075,22 @@ function renderSitePanel() {
       ${field('about_text', 'Texte « À propos »', { type: 'textarea', placeholder: 'Votre histoire, votre savoir-faire, vos produits…' })}
       <div class="field"><label>Galerie photos (une URL par ligne)</label><textarea data-gallery placeholder="https://…">${esc((c.gallery || []).join('\n'))}</textarea></div>
       <hr class="divider">
+      <label>Questions fréquentes</label>
+      <div id="faq-list">${(c.faq || []).map((f, i) => `<div class="faq-row" style="margin:8px 0;padding:10px;background:var(--surface-2);border-radius:10px">
+        <input data-faq="${i}" data-k="q" value="${esc(f.q)}" placeholder="Question" style="margin-bottom:6px"><textarea data-faq="${i}" data-k="a" rows="2" placeholder="Réponse">${esc(f.a)}</textarea>
+        <button type="button" class="link small" data-faq-del="${i}">Supprimer</button></div>`).join('')}</div>
+      <div class="row" style="gap:10px"><button type="button" class="link small" id="faq-add">+ Ajouter une question</button>${(c.faq || []).length ? '' : '<button type="button" class="link small" id="faq-ideas">Pré-remplir avec des questions courantes</button>'}</div>
+      <hr class="divider">
       <div class="grid-2">${[['instagram', 'Instagram', '@votre.salon'], ['facebook', 'Facebook', 'votre.page'], ['tiktok', 'TikTok', '@votre.salon'], ['whatsapp', 'WhatsApp', '+41 79 …']].map(([k, l, ph]) => `<div class="field"><label>${l}</label><input data-social="${k}" value="${esc(c.socials[k] || '')}" placeholder="${ph}"></div>`).join('')}</div>
     </div>`;
   } else if (siteState.tab === 'style') {
     panel.innerHTML = `<div class="card">
       <div class="field"><label>Couleur principale</label><div class="row" style="flex-wrap:nowrap"><input type="color" data-c="accent" value="${esc(c.accent || templateMeta(draft.template).colors.accent || ctx.salon.accent)}" style="max-width:90px"><label class="check small" style="margin:0"><input type="checkbox" id="accent-default" ${c.accent ? '' : 'checked'}> Couleur du modèle</label></div></div>
-      <h4>Sections affichées</h4>
-      ${Object.entries(SECTION_LABELS).map(([k, l]) => `<label class="check"><input type="checkbox" data-section="${k}" ${c.sections[k] !== false ? 'checked' : ''}> ${l}</label>`).join('')}
+      <h4>Sections : affichage et ordre</h4>
+      <div id="sec-list">${sectionOrderOf(c).map((k, i, arr) => `<div class="row sec-row" style="gap:6px;flex-wrap:nowrap;padding:4px 0;border-bottom:1px solid var(--line)">
+        <label class="check grow" style="margin:0"><input type="checkbox" data-section="${k}" ${c.sections[k] !== false ? 'checked' : ''}> ${SECTION_LABELS[k]}</label>
+        <button type="button" class="btn btn-ghost btn-sm" data-move="${k}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Monter">↑</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-move="${k}" data-dir="1" ${i === arr.length - 1 ? 'disabled' : ''} aria-label="Descendre">↓</button></div>`).join('')}</div>
       <hr class="divider">
       <label class="check"><input type="checkbox" id="site-published" ${draft.published ? 'checked' : ''}> Site en ligne</label>
     </div>`;
@@ -1115,6 +1130,29 @@ function renderSitePanel() {
     });
   }
 
+  panel.querySelectorAll('[data-move]').forEach((b) => {
+    b.onclick = () => {
+      const order = sectionOrderOf(c);
+      const i = order.indexOf(b.dataset.move);
+      const j = i + Number(b.dataset.dir);
+      [order[i], order[j]] = [order[j], order[i]];
+      c.order = order;
+      renderSitePanel();
+      refreshPreview();
+    };
+  });
+  $('#faq-add', panel)?.addEventListener('click', () => { (c.faq ||= []).push({ q: '', a: '' }); renderSitePanel(); });
+  $('#faq-ideas', panel)?.addEventListener('click', () => {
+    c.faq = [
+      { q: 'Puis-je annuler ou déplacer mon rendez-vous ?', a: `Oui, gratuitement jusqu’à ${ctx.salon.cancel_hours} h avant, en un clic depuis l’e-mail de confirmation.` },
+      { q: 'Quels moyens de paiement acceptez-vous ?', a: 'Espèces, cartes, TWINT et cartes cadeaux.' },
+      { q: 'Faut-il venir les cheveux lavés ?', a: 'Non, le shampoing est compris dans nos prestations.' },
+      { q: 'Y a-t-il un parking à proximité ?', a: 'Indiquez ici le parking ou l’arrêt de transport le plus proche.' },
+    ];
+    renderSitePanel();
+    refreshPreview();
+  });
+  panel.querySelectorAll('[data-faq-del]').forEach((b) => { b.onclick = () => { c.faq.splice(Number(b.dataset.faqDel), 1); renderSitePanel(); refreshPreview(); }; });
   panel.oninput = (e) => {
     const el = e.target;
     if (el.dataset.c) {
@@ -1123,6 +1161,7 @@ function renderSitePanel() {
     } else if (el.dataset.social) c.socials[el.dataset.social] = el.value;
     else if (el.hasAttribute('data-gallery')) c.gallery = el.value.split(/\s+/).filter(Boolean);
     else if (el.dataset.section) c.sections[el.dataset.section] = el.checked;
+    else if (el.dataset.faq !== undefined) c.faq[Number(el.dataset.faq)][el.dataset.k] = el.value;
     else if (el.id === 'accent-default') { if (el.checked) c.accent = ''; else c.accent = $('[data-c="accent"]').value; }
     else if (el.id === 'site-published') draft.published = el.checked;
     else if (el.id === 'custom-domain') draft.custom_domain = el.value;
@@ -1494,7 +1533,7 @@ async function renderMessages() {
     <div class="two-col" style="grid-template-columns:minmax(260px,1fr) 2fr">
       <div class="card" style="padding:8px 16px">${conversations.map((c) => `
         <div class="list-item conv-item ${msgState.open === c.id ? 'active' : ''}" data-conv="${c.id}" style="cursor:pointer">
-          <span data-icon-inline="${c.channel === 'phone' ? 'phone' : 'chat'}" class="muted" style="width:18px"></span>
+          <span data-icon-inline="${c.channel === 'phone' ? 'phone' : c.contact_form ? 'mail' : 'chat'}" class="muted" style="width:18px"></span>
           <div class="grow" style="min-width:0"><div class="row between"><b>${esc(c.customer_name || c.customer_phone || (c.channel === 'phone' ? 'Appel' : 'Visiteur du site'))}</b>${c.unread ? '<span class="badge badge-brand">Nouveau</span>' : ''}</div>
             <div class="small muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.outcome || c.last)}</div>
             <div class="small muted">${esc(c.updated_at.slice(0, 16).replace('T', ' '))} · <span class="badge ${CONV_STATUS[c.status][1]}">${CONV_STATUS[c.status][0]}</span></div></div>
@@ -1515,12 +1554,13 @@ async function openConversation() {
   const { conversation: c, messages } = await api(P(`/conversations/${msgState.open}`));
   $$('.conv-item').forEach((el) => el.classList.toggle('active', Number(el.dataset.conv) === c.id));
   pane.innerHTML = `<div class="row between"><div><h3 style="margin:0">${esc(c.customer_name || (c.channel === 'phone' ? 'Appel entrant' : 'Visiteur du site'))}</h3>
-      <div class="small muted">${c.channel === 'phone' ? 'Appel téléphonique' : 'Chat du site'}${c.customer_phone ? ` · <a href="tel:${esc(c.customer_phone)}">${esc(c.customer_phone)}</a>` : ''}</div></div>
+      <div class="small muted">${c.channel === 'phone' ? 'Appel téléphonique' : c.contact_form ? 'Formulaire de contact' : 'Chat du site'}${c.customer_phone ? ` · <a href="tel:${esc(c.customer_phone)}">${esc(c.customer_phone)}</a>` : ''}</div></div>
       <div class="row" style="gap:6px">${c.status !== 'done' ? '<button class="btn btn-ghost btn-sm" id="conv-done">Marquer traité</button>' : '<button class="btn btn-ghost btn-sm" id="conv-reopen">Rouvrir</button>'}
       ${c.human_mode ? '<button class="btn btn-ghost btn-sm" id="conv-ai">Rendre la main à l’IA</button>' : ''}</div></div>
     ${c.outcome ? `<div class="note-box" style="margin:12px 0"><b>Résultat :</b> ${esc(c.outcome)}${c.booking_id ? ' · <a href="#agenda">voir l’agenda</a>' : ''}</div>` : ''}
     <div class="chat-log">${messages.map((m) => `<div class="bubble from-${m.from}"><div class="small muted">${FROM_LABEL[m.from] || m.from}${m.author ? ` · ${esc(m.author)}` : ''} · ${esc((m.at || '').slice(11, 16))}</div>${esc(m.text)}</div>`).join('')}</div>
-    ${c.channel === 'chat' ? `<form id="conv-form" class="row" style="flex-wrap:nowrap;margin-top:12px"><input id="conv-reply" placeholder="Votre réponse au client…" autocomplete="off"><button class="btn btn-brand">Envoyer</button></form>` : '<p class="small muted" style="margin-top:12px">Pour un appel, rappelez le client au numéro ci-dessus.</p>'}`;
+    ${c.contact_form ? `<p class="small" style="margin-top:12px">Message reçu via le formulaire de contact de votre site. ${/@/.test(c.customer_phone) ? `<a class="btn btn-brand btn-sm" href="mailto:${esc(c.customer_phone)}?subject=${encodeURIComponent(`Votre message à ${ctx.salon.name}`)}">Répondre par e-mail</a>` : `<a class="btn btn-brand btn-sm" href="tel:${esc(c.customer_phone)}">Appeler</a>`}</p>`
+      : c.channel === 'chat' ? `<form id="conv-form" class="row" style="flex-wrap:nowrap;margin-top:12px"><input id="conv-reply" placeholder="Votre réponse au client…" autocomplete="off"><button class="btn btn-brand">Envoyer</button></form>` : '<p class="small muted" style="margin-top:12px">Pour un appel, rappelez le client au numéro ci-dessus.</p>'}`;
   const log = $('.chat-log', pane);
   log.scrollTop = log.scrollHeight;
   const patch = async (body) => { await api(P(`/conversations/${c.id}`), { method: 'PATCH', body }); renderMessages(); };

@@ -12,7 +12,7 @@ const { PLANS, TEMPLATE_PRICING, CURRENCY } = require('../plans');
 const sites = require('../sites');
 const payments = require('../payments');
 const billing = require('../billing');
-const { TEMPLATES, SECTION_KEYS } = require('../templates');
+const { TEMPLATES, SECTION_KEYS, sectionOrder, cleanFaq } = require('../templates');
 
 const router = express.Router();
 router.use(requireRole('pro', 'admin', 'staff'));
@@ -825,6 +825,8 @@ function sanitizeContent(raw = {}) {
     accent: /^#[0-9a-f]{6}$/i.test(raw.accent || '') ? raw.accent : '',
     socials: Object.fromEntries(['instagram', 'facebook', 'tiktok', 'whatsapp'].map((k) => [k, str(raw.socials?.[k], 120)])),
     sections: Object.fromEntries(SECTION_KEYS.map((k) => [k, raw.sections?.[k] !== false])),
+    order: sectionOrder(raw.order),
+    faq: cleanFaq(raw.faq),
     hide_branding: !!raw.hide_branding,
   };
 }
@@ -996,7 +998,7 @@ router.post('/assistant/test', async (req, res) => {
 });
 
 const convRow = (c) => ({
-  id: c.id, channel: c.channel, customer_name: c.customer_name, customer_phone: c.customer_phone, outcome: c.outcome, summary: c.summary,
+  id: c.id, channel: c.channel, contact_form: c.external_id.startsWith('contact-'), customer_name: c.customer_name, customer_phone: c.customer_phone, outcome: c.outcome, summary: c.summary,
   status: c.status, unread: c.unread, human_mode: c.human_mode, booking_id: c.booking_id, created_at: c.created_at, updated_at: c.updated_at,
   last: (JSON.parse(c.transcript).at(-1) || {}).text || '',
 });

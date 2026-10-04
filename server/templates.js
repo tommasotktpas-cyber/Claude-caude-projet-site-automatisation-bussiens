@@ -82,7 +82,15 @@ const TEMPLATES = [
 
 const templateById = (id) => TEMPLATES.find((t) => t.id === id) || TEMPLATES[0];
 
-const SECTION_KEYS = ['about', 'services', 'team', 'gallery', 'reviews', 'infos'];
+const SECTION_KEYS = ['about', 'services', 'team', 'gallery', 'reviews', 'faq', 'infos', 'contact'];
+
+/** Valid section order: known keys once each, missing ones appended in default order. */
+const sectionOrder = (raw) => {
+  const list = Array.isArray(raw) ? raw.filter((k, i) => SECTION_KEYS.includes(k) && raw.indexOf(k) === i) : [];
+  return [...list, ...SECTION_KEYS.filter((k) => !list.includes(k))];
+};
+const cleanFaq = (raw) => (Array.isArray(raw) ? raw : [])
+  .map((f) => ({ q: String(f?.q ?? '').trim().slice(0, 200), a: String(f?.a ?? '').trim().slice(0, 1500) })).filter((f) => f.q && f.a).slice(0, 12);
 
 /** Fills content defaults from the salon record. */
 function contentWithDefaults(salon, raw = {}) {
@@ -104,6 +112,8 @@ function contentWithDefaults(salon, raw = {}) {
       tiktok: raw.socials?.tiktok || '', whatsapp: raw.socials?.whatsapp || '',
     },
     sections,
+    order: sectionOrder(raw.order),
+    faq: cleanFaq(raw.faq),
     hide_branding: !!raw.hide_branding,
   };
 }
@@ -185,7 +195,8 @@ function renderSite({ salon, services, staff, hours, reviews, rating, content, t
     : `<div class="card svc"><div><h4>${esc(s.name)}</h4><p class="muted small">${duration(s.duration_min)}${s.description ? ` · ${esc(s.description)}` : ''}</p></div>
         <div class="svc-foot"><b>${money(s.price_cents, currency)}</b><button class="btn btn--sm" data-book="${s.id}">Réserver</button></div></div>`);
 
-  const sections = [];
+  const sec = {};
+  const sections = { push: (html) => { sec[/id="(\w+)"/.exec(html)[1]] = html; } };
   if (c.sections.about && c.about_text) {
     sections.push(`<section id="about" class="section"><div class="wrap grid2 about">
       <div><p class="label">À propos</p><h2>${esc(c.about_title)}</h2></div>
@@ -223,8 +234,23 @@ function renderSite({ salon, services, staff, hours, reviews, rating, content, t
     </div></section>`);
   }
 
-  const navLinks = [['services', 'Prestations'], ['team', 'Équipe'], ['reviews', 'Avis'], ['infos', 'Infos']]
-    .filter(([k]) => c.sections[k]).map(([k, l]) => `<a href="#${k}">${l}</a>`).join('');
+  if (c.sections.faq && c.faq.length) {
+    sections.push(`<section id="faq" class="section"><div class="wrap narrow-wrap"><p class="label">Questions fréquentes</p><h2>Bon à savoir</h2>
+      <div class="faq">${c.faq.map((f) => `<details><summary>${esc(f.q)}</summary><p>${esc(f.a)}</p></details>`).join('')}</div></div></section>`);
+  }
+  if (c.sections.contact && !preview) {
+    sections.push(`<section id="contact" class="section"><div class="wrap narrow-wrap"><p class="label">Contact</p><h2>Une question ? Écrivez-nous</h2>
+      <form class="contact-form" id="contact-form"><div class="cf-row"><input name="name" placeholder="Votre nom" required maxlength="120"><input name="phone" placeholder="Téléphone ou e-mail" required maxlength="160"></div>
+        <textarea name="message" placeholder="Votre message" required maxlength="2000" rows="4"></textarea>
+        <input name="website" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px" aria-hidden="true">
+        <button class="btn">Envoyer</button><p class="small muted cf-status" role="status"></p></form></div></section>`);
+  } else if (c.sections.contact) {
+    sections.push(`<section id="contact" class="section"><div class="wrap narrow-wrap"><p class="label">Contact</p><h2>Une question ? Écrivez-nous</h2><p class="muted">Formulaire de contact (actif sur le site publié).</p></div></section>`);
+  }
+  const ordered = c.order.filter((k) => sec[k]).map((k, i) => (i % 2 ? sec[k].replace(/^<section id="(\w+)" class="section(?: alt)?"/, '<section id="$1" class="section alt"') : sec[k].replace(/^<section id="(\w+)" class="section(?: alt)?"/, '<section id="$1" class="section"')));
+
+  const navLabels = { services: 'Prestations', team: 'Équipe', reviews: 'Avis', faq: 'FAQ', infos: 'Infos', contact: 'Contact' };
+  const navLinks = c.order.filter((k) => navLabels[k] && sec[k]).map((k) => `<a href="#${k}">${navLabels[k]}</a>`).join('');
 
   const css = `
 :root{--bg:${t.colors.bg};--surface:${t.colors.surface};--text:${t.colors.text};--muted:${t.colors.muted};--line:${t.colors.line};--accent:${accent};--accent-ink:${accentInk};--r:${t.radius}px;--fd:'${t.fonts.display}',Georgia,serif;--fb:'${t.fonts.body}',system-ui,sans-serif}
@@ -273,6 +299,8 @@ footer{padding:40px 0;border-top:1px solid var(--line);color:var(--muted);font-s
 .bk-box{width:min(540px,100%);height:min(860px,100%);background:#fff;border-radius:18px;overflow:hidden;position:relative;box-shadow:0 30px 80px rgba(0,0,0,.35)}.bk-box iframe{width:100%;height:100%;border:0}
 @media(max-width:600px){.bk{padding:0}.bk-box{height:100%;border-radius:0}}
 ${preview ? '.preview-flag{position:fixed;bottom:10px;left:10px;z-index:200;background:#111;color:#fff;font:600 12px system-ui;padding:6px 10px;border-radius:8px;opacity:.8}' : ''}
+.narrow-wrap{max-width:760px}.faq details{border-bottom:1px solid var(--line);padding:16px 0}.faq summary{cursor:pointer;font-weight:600;font-size:1.05rem;list-style:none;display:flex;justify-content:space-between;gap:16px}.faq summary::after{content:'+';color:var(--accent);font-size:1.4rem;line-height:1}.faq details[open] summary::after{content:'–'}.faq p{margin:10px 0 0;color:var(--muted)}
+.contact-form{display:grid;gap:12px;position:relative}.cf-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.contact-form input,.contact-form textarea{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:min(var(--r),12px);padding:12px 14px;width:100%}.contact-form .btn{justify-self:start}@media(max-width:640px){.cf-row{grid-template-columns:1fr}}
 `;
 
   const description = `${c.hero_subtitle} ${salon.address}, ${salon.city}. Réservation en ligne 24/7.`.slice(0, 300);
@@ -302,7 +330,7 @@ ${c.announcement ? `<div class="announce">${esc(c.announcement)}</div>` : ''}
 <header class="nav"><div class="wrap"><a class="brand" href="#top">${esc(salon.name)}</a><nav>${navLinks}</nav><button class="btn btn--sm" data-book>Réserver</button></div></header>
 <main id="top">
 ${heroes[t.hero]}
-${sections.join('\n')}
+${ordered.join('\n')}
 </main>
 <footer><div class="wrap"><span>© ${new Date().getFullYear()} ${esc(salon.name)} · ${esc(salon.address)}, ${esc(salon.city)}</span>${showBranding ? '<a href="/pro" target="_blank" rel="noopener">Réservation propulsée par Lumea</a>' : ''}</div></footer>
 <div class="sticky-cta"><button class="btn" data-book>${esc(c.cta_label)}</button></div>
@@ -316,6 +344,9 @@ ${sections.join('\n')}
   bk.addEventListener('click',function(e){if(e.target===bk)close()});
   addEventListener('keydown',function(e){if(e.key==='Escape')close()});
   addEventListener('message',function(e){if(e.origin===location.origin&&e.data&&e.data.lumea==='close')close()});
+  var cf=document.getElementById('contact-form');
+  if(cf)cf.addEventListener('submit',function(e){e.preventDefault();var st=cf.querySelector('.cf-status'),b=cf.querySelector('button'),d={};new FormData(cf).forEach(function(v,k){d[k]=v});b.disabled=true;st.textContent='Envoi…';
+    fetch('/api/public/salons/${slug}/contact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||'Envoi impossible.');cf.reset();st.textContent='Merci ! Votre message a bien été transmis, nous revenons vers vous rapidement.'})}).catch(function(err){st.textContent=err.message}).then(function(){b.disabled=false})});
 })();
 </script>
 ${preview ? '' : `<script src="/js/chat-widget.js" data-salon="${slug}" data-color="${esc(accent)}" data-name="${esc(salon.name)}" data-offset="1" defer></script>`}
@@ -323,4 +354,4 @@ ${preview ? '' : `<script src="/js/chat-widget.js" data-salon="${slug}" data-col
 </html>`;
 }
 
-module.exports = { TEMPLATES, templateById, renderSite, contentWithDefaults, SECTION_KEYS };
+module.exports = { TEMPLATES, templateById, renderSite, contentWithDefaults, SECTION_KEYS, sectionOrder, cleanFaq };
