@@ -19,7 +19,7 @@ $('#logout').onclick = async (e) => {
   location.href = '/';
 };
 
-const STAFF_ROUTES = ['agenda', 'clients', 'caisse'];
+const STAFF_ROUTES = ['agenda', 'clients', 'caisse', 'gains', 'planning'];
 
 async function refreshCtx() {
   const [s, staff, services] = await Promise.all([api(P('/salon')), api(P('/staff')), api(P('/services'))]);
@@ -555,6 +555,8 @@ async function renderTeam() {
     <div class="features">${ctx.staff.map((s) => `
       <div class="card" style="${s.active ? '' : 'opacity:.6'}">
         <div class="row"><span class="avatar" style="--c:${esc(s.color)}">${esc(fmt.initials(s.name))}</span><div class="grow"><b>${esc(s.name)}</b><div class="small muted">${esc(s.title)}</div></div>${s.active ? '' : '<span class="badge">Inactif</span>'}</div>
+        <div class="row" style="gap:6px;margin-top:10px"><span class="badge ${s.employment === 'independant' ? 'badge-brand' : ''}">${s.employment === 'independant' ? 'Indépendant·e' : 'Salarié·e'}</span>
+          <span class="badge">${s.pay_model === 'loyer' ? `Fauteuil ${fmt.eur(s.chair_rent_cents)}/mois` : s.pay_model === 'commission' ? `${s.rate_percent} % des prestations` : `Fixe${s.rate_percent ? ` + ${s.rate_percent} % produits` : ''}`}</span></div>
         <div class="small muted" style="margin-top:12px">${[1, 2, 3, 4, 5, 6, 0].map((wd) => { const h = s.hours.filter((x) => x.weekday === wd); return h.length ? `${WEEKDAYS[wd].slice(0, 3)}. ${h[0].start}–${h[h.length - 1].end}` : ''; }).filter(Boolean).join(' · ') || 'Aucun horaire'}</div>
         <div class="small" style="margin-top:8px">${s.service_ids.length} prestation(s) · ${s.time_off.length} absence(s) prévue(s)</div>
         <div class="row" style="margin-top:14px"><button class="btn btn-ghost btn-sm" data-edit="${s.id}">Modifier</button><button class="btn btn-ghost btn-sm" data-off="${s.id}">Absences</button><button class="btn btn-ghost btn-sm" data-access="${s.id}">${s.access ? 'Accès ✓' : 'Donner un accès'}</button></div>
@@ -576,6 +578,18 @@ function staffForm(s = null) {
         <div class="field"><label>Poste</label><input name="title" value="${esc(s?.title || '')}" placeholder="Coiffeur·se"></div>
         <div class="field"><label>Couleur agenda</label><input name="color" type="color" value="${esc(s?.color || '#0ea5e9')}"></div>
       </div>
+      <h4>Statut & rémunération</h4>
+      <div class="grid-2">
+        <div class="field"><label>Statut</label><select name="employment"><option value="salarie" ${s?.employment !== 'independant' ? 'selected' : ''}>Salarié·e</option><option value="independant" ${s?.employment === 'independant' ? 'selected' : ''}>Indépendant·e</option></select><div class="hint">Un·e indépendant·e gère ses propres horaires et absences depuis son accès.</div></div>
+        <div class="field"><label>Modèle</label><select name="pay_model">
+          <option value="fixe" ${!s || s.pay_model === 'fixe' ? 'selected' : ''}>Salaire fixe (+ % sur les produits)</option>
+          <option value="commission" ${s?.pay_model === 'commission' ? 'selected' : ''}>Pourcentage des prestations</option>
+          <option value="loyer" ${s?.pay_model === 'loyer' ? 'selected' : ''}>Location de fauteuil (indépendant)</option></select></div>
+      </div>
+      <div class="grid-2">
+        <div class="field"><label>Pourcentage pour le collaborateur (%)</label><input name="rate_percent" type="number" min="0" max="100" value="${s?.rate_percent ?? 0}"></div>
+        <div class="field"><label>Loyer de fauteuil (${CURRENCY} / mois)</label><input name="chair_rent" type="number" min="0" step="10" value="${s ? s.chair_rent_cents / 100 : 0}"></div>
+      </div>
       <h4>Horaires de travail</h4>${hoursEditor(hours)}
       <h4 style="margin-top:16px">Prestations réalisées</h4>
       <div class="grid-2">${ctx.services.map((sv) => `<label class="check small"><input type="checkbox" name="svc" value="${sv.id}" ${!s || s.service_ids.includes(sv.id) ? 'checked' : ''}> ${esc(sv.name)}</label>`).join('')}</div>
@@ -588,6 +602,7 @@ function staffForm(s = null) {
         const body = {
           name: form.name.value, title: form.title.value, color: form.color.value, hours: readHours(form),
           service_ids: $$('[name="svc"]:checked', form).map((c) => Number(c.value)),
+          employment: form.employment.value, pay_model: form.pay_model.value, rate_percent: Number(form.rate_percent.value), chair_rent: Number(form.chair_rent.value),
         };
         if (s) body.active = form.active.checked;
         await api(P(s ? `/staff/${s.id}` : '/staff'), { method: s ? 'PUT' : 'POST', body });
@@ -1369,12 +1384,64 @@ function productForm(p = null) {
   });
 }
 
+
+// =====================================================================
+// Earnings (owner: everyone · collaborator: own) and independents' planning
+// =====================================================================
+const earnState = { month: null };
+async function renderEarnings() {
+  earnState.month ||= ctx.today.slice(0, 7);
+  const r = await api(P(`/earnings?month=${earnState.month}`));
+  const label = new Date(`${earnState.month}-15T12:00:00Z`).toLocaleDateString('fr-CH', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const shift = (n) => { const d = new Date(`${earnState.month}-15T12:00:00Z`); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 7); };
+  const explain = (x) => (x.pay_model === 'loyer'
+    ? `Garde tout son chiffre d’affaires et paie ${fmt.eur(x.chair_rent_cents)} de loyer de fauteuil.`
+    : x.pay_model === 'commission' ? `Reçoit ${x.rate_percent} % des prestations, plus ses pourboires.`
+      : `Salaire fixe${x.rate_percent ? `, plus ${x.rate_percent} % des produits vendus` : ''}, plus ses pourboires.`);
+  view.innerHTML = `${head(ctx.isStaff ? 'Mes gains' : 'Rémunérations', `<button class="btn btn-ghost btn-sm" data-m="-1">‹</button><b style="text-transform:capitalize">${label}</b><button class="btn btn-ghost btn-sm" data-m="1">›</button>`)}
+    ${ctx.isStaff && r.rows[0] ? (() => {
+      const x = r.rows[0];
+      return `<div class="kpis">
+        <div class="kpi"><div class="label">${x.pay_model === 'loyer' ? 'Votre résultat (après loyer)' : 'Vous revient'}</div><div class="value">${fmt.eur(x.collaborator_cents)}</div><div class="sub">${esc(explain(x))}</div></div>
+        <div class="kpi"><div class="label">Prestations</div><div class="value">${fmt.eur(x.services_cents)}</div><div class="sub">${x.visits} client(s)</div></div>
+        <div class="kpi"><div class="label">Produits vendus</div><div class="value">${fmt.eur(x.products_cents)}</div></div>
+        <div class="kpi"><div class="label">Pourboires</div><div class="value">${fmt.eur(x.tips_cents)}</div></div></div>
+        <p class="small muted">Calcul indicatif à partir de la caisse. Les charges sociales et impôts ne sont pas inclus.</p>`;
+    })() : `<div class="table-wrap"><table><thead><tr><th>Collaborateur</th><th>Modèle</th><th>Clients</th><th>Prestations</th><th>Produits</th><th>Pourboires</th><th>Pour le collaborateur</th><th>Pour le salon</th></tr></thead><tbody>
+      ${r.rows.map((x) => `<tr><td><b>${esc(x.name)}</b><div class="small muted">${x.employment === 'independant' ? 'Indépendant·e' : 'Salarié·e'}</div></td>
+        <td class="small">${esc(x.pay_label)}${x.pay_model === 'loyer' ? ` · ${fmt.eur(x.chair_rent_cents)}` : x.rate_percent ? ` · ${x.rate_percent} %` : ''}</td>
+        <td>${x.visits}</td><td>${fmt.eur(x.services_cents)}</td><td>${fmt.eur(x.products_cents)}</td><td>${fmt.eur(x.tips_cents)}</td>
+        <td><b>${fmt.eur(x.collaborator_cents)}</b></td><td><b>${fmt.eur(x.salon_cents)}</b></td></tr>`).join('')}
+      </tbody></table></div>
+      <p class="small muted" style="margin-top:10px">Pour le salon : marge sur les prestations et produits, ou loyer de fauteuil des indépendants. Les salaires fixes ne sont pas déduits. Réglez le modèle de chacun dans <a href="#team">Équipe</a>.</p>`}`;
+  view.querySelectorAll('[data-m]').forEach((b) => { b.onclick = () => { earnState.month = shift(Number(b.dataset.m)); renderEarnings(); }; });
+}
+
+async function renderMyPlanning() {
+  const me = await api(P('/me'));
+  view.innerHTML = `${head('Mes horaires')}
+    ${me.can_edit ? '' : '<div class="card" style="margin-bottom:14px;background:var(--surface-2);border:0">Vos horaires et absences sont gérés par le salon. Demandez au gérant pour toute modification.</div>'}
+    <div class="two-col">
+      <form class="card" id="my-hours"><h3>Mes jours et heures de travail</h3>${hoursEditor(me.hours)}
+        ${me.can_edit ? '<button class="btn btn-brand" style="margin-top:12px">Enregistrer</button>' : ''}</form>
+      <div class="card"><h3>Mes absences</h3>
+        ${me.time_off.map((t) => `<div class="list-item small"><div class="grow"><b>${fmt.date(t.start_at, { day: 'numeric', month: 'short' })} ${t.start_at.slice(11)}</b> → <b>${fmt.date(t.end_at, { day: 'numeric', month: 'short' })} ${t.end_at.slice(11)}</b> <span class="muted">${esc(t.reason)}</span></div>${me.can_edit ? `<button class="btn btn-ghost btn-sm" data-del="${t.id}">Supprimer</button>` : ''}</div>`).join('') || '<p class="muted small">Aucune absence prévue.</p>'}
+        ${me.can_edit ? `<hr class="divider"><form id="my-off"><div class="grid-2"><div class="field"><label>Début</label><input type="datetime-local" name="start_at" value="${ctx.today}T09:00" required></div>
+          <div class="field"><label>Fin</label><input type="datetime-local" name="end_at" value="${ctx.today}T19:00" required></div></div>
+          <div class="field"><label>Motif</label><input name="reason" placeholder="Vacances, formation…"></div><button class="btn btn-ghost">Bloquer cette période</button></form>` : ''}
+      </div></div>`;
+  if (!me.can_edit) { $$('#my-hours input').forEach((i) => { i.disabled = true; }); return; }
+  $('#my-hours').onsubmit = async (e) => { e.preventDefault(); try { await api(P('/me/hours'), { method: 'PUT', body: { hours: readHours(e.target) } }); toast('Horaires enregistrés : votre agenda en ligne est à jour.'); } catch (err) { toast(err.message, 'error'); } };
+  $('#my-off').onsubmit = async (e) => { e.preventDefault(); try { await api(P('/me/time-off'), { method: 'POST', body: formData(e.target) }); toast('Période bloquée.'); renderMyPlanning(); } catch (err) { toast(err.message, 'error'); } };
+  view.querySelectorAll('[data-del]').forEach((b) => { b.onclick = async () => { await api(P(`/me/time-off/${b.dataset.del}`), { method: 'DELETE' }); renderMyPlanning(); }; });
+}
+
 // =====================================================================
 // Router
 // =====================================================================
 const ROUTES = {
   dashboard: renderDashboard, agenda: renderAgenda, clients: () => renderClients(), services: renderServices,
-  team: renderTeam, reviews: renderReviews, automations: renderAutomations, settings: renderSettings, billing: renderBilling, site: renderSiteEditor, caisse: renderTill, stock: renderStock,
+  team: renderTeam, reviews: renderReviews, automations: renderAutomations, settings: renderSettings, billing: renderBilling, site: renderSiteEditor, caisse: renderTill, stock: renderStock, gains: renderEarnings, planning: renderMyPlanning,
 };
 
 async function route() {
@@ -1402,6 +1469,8 @@ async function route() {
   if (ctx.isStaff) {
     // Employee access: own agenda and client file only.
     $$('[data-route]').forEach((a) => { if (!STAFF_ROUTES.includes(a.dataset.route)) a.remove(); });
+    $$('[data-staff-only]').forEach((a) => { a.hidden = false; });
+    $('[data-route="gains"]').lastChild.textContent = 'Mes gains';
     if (!location.hash) location.hash = '#agenda';
   }
   try {

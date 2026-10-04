@@ -20,7 +20,10 @@ router.use(requireRole('pro', 'admin', 'staff'));
 // Employees (role "staff") only reach their own agenda, bookings and the client file.
 const STAFF_ALLOWED = [
   ['GET', /^\/(salon|staff|services|agenda|slots|clients(\/\d+)?|bookings\/\d+\/style|products|sales|gift-cards\/[\w-]+)$/],
-  ['POST', /^\/(bookings|sales)$/],
+  ['POST', /^\/(bookings|sales|me\/time-off)$/],
+  ['GET', /^\/(earnings|me)$/],
+  ['PUT', /^\/me\/hours$/],
+  ['DELETE', /^\/me\/time-off\/\d+$/],
   ['PATCH', /^\/bookings\/\d+$/],
   ['PUT', /^\/clients\/\d+$/],
 ];
@@ -279,6 +282,18 @@ function saveStaffRelations(salonId, staffId, b) {
   }
 }
 
+/** Employment status and pay model of a collaborator. */
+function staffPayFields(b, prev = {}) {
+  const employment = ['salarie', 'independant'].includes(b.employment) ? b.employment : prev.employment || 'salarie';
+  let model = ['fixe', 'commission', 'loyer'].includes(b.pay_model) ? b.pay_model : prev.pay_model || 'fixe';
+  if (employment === 'salarie' && model === 'loyer') model = 'fixe';
+  return {
+    employment, pay_model: model,
+    rate_percent: int(b.rate_percent, 0, 100, prev.rate_percent ?? 0),
+    chair_rent_cents: b.chair_rent !== undefined ? Math.max(0, Math.round(Number(b.chair_rent) * 100) || 0) : prev.chair_rent_cents ?? 0,
+  };
+}
+
 router.post('/staff', (req, res) => {
   const b = req.body || {};
   const name = clean(b.name, 80);
@@ -289,8 +304,9 @@ router.post('/staff', (req, res) => {
     throw new HttpError(402, `Votre formule ${plan.name} est limitée à ${plan.max_staff} collaborateur(s). Passez à la formule supérieure.`);
   }
   const id = tx(() => {
-    const sid = Number(run('INSERT INTO staff (salon_id, name, title, color) VALUES (?,?,?,?)',
-      req.salon.id, name, clean(b.title, 80), isHex(b.color) ? b.color : '#0ea5e9').lastInsertRowid);
+    const pay = staffPayFields(b);
+    const sid = Number(run('INSERT INTO staff (salon_id, name, title, color, employment, pay_model, rate_percent, chair_rent_cents) VALUES (?,?,?,?,?,?,?,?)',
+      req.salon.id, name, clean(b.title, 80), isHex(b.color) ? b.color : '#0ea5e9', pay.employment, pay.pay_model, pay.rate_percent, pay.chair_rent_cents).lastInsertRowid);
     const defaults = all('SELECT weekday, open AS start, close AS end FROM opening_hours WHERE salon_id = ?', req.salon.id);
     saveStaffRelations(req.salon.id, sid, {
       hours: b.hours || defaults,
@@ -305,9 +321,10 @@ router.put('/staff/:id', (req, res) => {
   const s = ownStaff(req);
   const b = req.body || {};
   tx(() => {
-    run('UPDATE staff SET name=?, title=?, color=?, active=? WHERE id=?',
+    const pay = staffPayFields(b, s);
+    run('UPDATE staff SET name=?, title=?, color=?, active=?, employment=?, pay_model=?, rate_percent=?, chair_rent_cents=? WHERE id=?',
       clean(b.name ?? s.name, 80) || s.name, clean(b.title ?? s.title, 80), isHex(b.color) ? b.color : s.color,
-      b.active === undefined ? s.active : (b.active ? 1 : 0), s.id);
+      b.active === undefined ? s.active : (b.active ? 1 : 0), pay.employment, pay.pay_model, pay.rate_percent, pay.chair_rent_cents, s.id);
     saveStaffRelations(req.salon.id, s.id, b);
   });
   res.json({ ok: true });
@@ -671,6 +688,100 @@ router.get('/gift-cards', (req, res) => {
 router.get('/gift-cards/:code', (req, res) => {
   const g = pos.findGiftCard(req.salon.id, req.params.code);
   res.json({ code: g.code, balance_cents: g.balance_cents, initial_cents: g.initial_cents, expires_at: g.expires_at, recipient_name: g.recipient_name });
+});
+
+// ---------- Collaborators: earnings, independents' own schedule ----------
+
+const PAY_LABEL = { fixe: 'Salaire fixe', commission: 'Pourcentage', loyer: 'Location de fauteuil' };
+
+/** Monthly figures per collaborator from the till (and completed visits not rung up). */
+function earningsFor(salonId, month, staffId = null) {
+  const from = `${month}-01`;
+  const to = `${month}-31`;
+  const staff = all(`SELECT * FROM staff WHERE salon_id = ? ${staffId ? 'AND id = ?' : ''} ORDER BY id`, ...(staffId ? [salonId, staffId] : [salonId]));
+  return staff.map((st) => {
+    const sales = one(
+      `SELECT COALESCE(SUM(i.total_cents) FILTER (WHERE i.kind = 'service'), 0) AS services,
+              COALESCE(SUM(i.total_cents) FILTER (WHERE i.kind = 'product'), 0) AS products
+       FROM sales s JOIN sale_items i ON i.sale_id = s.id
+       WHERE s.salon_id = ? AND s.staff_id = ? AND s.voided = 0 AND s.day BETWEEN ? AND ?`, salonId, st.id, from, to,
+    );
+    const tips = one('SELECT COALESCE(SUM(tip_cents), 0) AS t, COALESCE(SUM(discount_cents), 0) AS d FROM sales WHERE salon_id = ? AND staff_id = ? AND voided = 0 AND day BETWEEN ? AND ?', salonId, st.id, from, to);
+    const notRungUp = one(
+      `SELECT COALESCE(SUM(price_cents), 0) AS v, COUNT(*) AS n FROM bookings b
+       WHERE b.salon_id = ? AND b.staff_id = ? AND b.status = 'completed' AND substr(b.start_at,1,10) BETWEEN ? AND ?
+         AND NOT EXISTS (SELECT 1 FROM sales s WHERE s.booking_id = b.id AND s.voided = 0)`, salonId, st.id, from, to,
+    );
+    const visits = one("SELECT COUNT(*) AS n FROM bookings WHERE salon_id = ? AND staff_id = ? AND status = 'completed' AND substr(start_at,1,10) BETWEEN ? AND ?", salonId, st.id, from, to).n;
+    const services = sales.services + notRungUp.v - tips.d;
+    const products = sales.products;
+    let collaborator = tips.t;
+    let salon = 0;
+    if (st.pay_model === 'loyer') {
+      collaborator += services + products - st.chair_rent_cents;
+      salon = st.chair_rent_cents;
+    } else if (st.pay_model === 'commission') {
+      const share = Math.round((services * st.rate_percent) / 100);
+      collaborator += share;
+      salon = services - share + products;
+    } else {
+      const bonus = Math.round((products * st.rate_percent) / 100);
+      collaborator += bonus;
+      salon = services + products - bonus;
+    }
+    return {
+      staff_id: st.id, name: st.name, color: st.color, employment: st.employment, pay_model: st.pay_model, pay_label: PAY_LABEL[st.pay_model],
+      rate_percent: st.rate_percent, chair_rent_cents: st.chair_rent_cents, visits,
+      services_cents: services, products_cents: products, tips_cents: tips.t, collaborator_cents: collaborator, salon_cents: salon,
+    };
+  });
+}
+
+router.get('/earnings', (req, res) => {
+  const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : T.now().date.slice(0, 7);
+  res.json({ month, rows: earningsFor(req.salon.id, month, req.staffId || null) });
+});
+
+router.get('/me', (req, res) => {
+  if (!req.staffId) throw new HttpError(400, 'Réservé aux collaborateurs.');
+  const st = one('SELECT * FROM staff WHERE id = ?', req.staffId);
+  res.json({
+    staff: st,
+    hours: all('SELECT weekday, start, end FROM staff_hours WHERE staff_id = ? ORDER BY weekday, start', st.id),
+    time_off: all('SELECT * FROM time_off WHERE staff_id = ? AND end_at >= ? ORDER BY start_at', st.id, T.now().iso),
+    can_edit: st.employment === 'independant',
+  });
+});
+
+function requireIndependent(req) {
+  const st = one('SELECT employment FROM staff WHERE id = ?', req.staffId);
+  if (!st || st.employment !== 'independant') throw new HttpError(403, 'Vos horaires sont gérés par le salon. Demandez au gérant.');
+}
+
+router.put('/me/hours', (req, res) => {
+  requireIndependent(req);
+  const hours = validHours(req.body?.hours);
+  tx(() => {
+    run('DELETE FROM staff_hours WHERE staff_id = ?', req.staffId);
+    for (const h of hours) run('INSERT INTO staff_hours (staff_id, weekday, start, end) VALUES (?,?,?,?)', req.staffId, h.weekday, h.start, h.end);
+  });
+  res.json({ ok: true });
+});
+
+router.post('/me/time-off', (req, res) => {
+  requireIndependent(req);
+  const { start_at, end_at, reason } = req.body || {};
+  const re = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+  if (!re.test(start_at) || !re.test(end_at) || start_at >= end_at) throw new HttpError(400, 'Période invalide.');
+  run('INSERT INTO time_off (staff_id, start_at, end_at, reason) VALUES (?,?,?,?)', req.staffId, start_at, end_at, clean(reason, 120));
+  res.status(201).json({ ok: true });
+});
+
+router.delete('/me/time-off/:id', (req, res) => {
+  requireIndependent(req);
+  const r = run('DELETE FROM time_off WHERE id = ? AND staff_id = ?', Number(req.params.id), req.staffId);
+  if (!r.changes) throw new HttpError(404, 'Absence introuvable.');
+  res.json({ ok: true });
 });
 
 // ---------- 3D haircut studio ----------

@@ -353,6 +353,11 @@ CREATE TABLE IF NOT EXISTS stock_movements (
 addColumn('salons', 'giftcards_enabled', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('sales', 'prepaid_cents', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('salons', 'boost_until', "TEXT NOT NULL DEFAULT ''");
+// Collaborators: employees or independents (chair rental / revenue share).
+addColumn('staff', 'employment', "TEXT NOT NULL DEFAULT 'salarie'"); // salarie | independant
+addColumn('staff', 'pay_model', "TEXT NOT NULL DEFAULT 'fixe'"); // fixe | commission | loyer
+addColumn('staff', 'rate_percent', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('staff', 'chair_rent_cents', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('salons', 'boost_subscription_id', 'TEXT');
 addColumn('design_requests', 'paid_chf', 'INTEGER NOT NULL DEFAULT 0');
 

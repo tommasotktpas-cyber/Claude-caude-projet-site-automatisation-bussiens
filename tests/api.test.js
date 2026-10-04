@@ -392,3 +392,37 @@ test('retention: last-minute deal, rebook reminder and birthday message', async 
   assert.equal(one("SELECT COUNT(*) AS n FROM notifications WHERE kind = 'rebook' AND recipient = 'fidele@test.ch'").n, 1);
   assert.equal(one("SELECT COUNT(*) AS n FROM notifications WHERE kind = 'birthday' AND recipient = 'fidele@test.ch'").n, 1);
 });
+
+test('collaborators: independents manage their schedule, earnings per pay model', async () => {
+  const uid = Number(run("INSERT INTO users (email, password_hash, name, role) VALUES ('team@test.lu', ?, 'Owner', 'pro')", hashPassword('password123')).lastInsertRowid);
+  const salon = createSalon(uid, {
+    name: 'Salon Equipe 2', city: 'Genève', category: 'coiffure',
+    hours: [{ weekday: 2, open: '09:00', close: '18:00' }],
+    services: [{ name: 'Coupe', duration_min: 60, price_cents: 10000 }], staff: [{ name: 'Indé' }, { name: 'Sala' }],
+  });
+  const [inde, sala] = require('../server/db').all('SELECT id FROM staff WHERE salon_id = ? ORDER BY id', salon.id).map((x) => x.id);
+  const owner = (await req('/api/auth/login', { method: 'POST', body: { email: 'team@test.lu', password: 'password123' } })).cookie;
+  await req(`/api/pro/staff/${inde}`, { method: 'PUT', cookie: owner, body: { employment: 'independant', pay_model: 'loyer', chair_rent: 800 } });
+  await req(`/api/pro/staff/${sala}`, { method: 'PUT', cookie: owner, body: { employment: 'salarie', pay_model: 'commission', rate_percent: 40 } });
+  const sv = one('SELECT id FROM services WHERE salon_id = ?', salon.id).id;
+  for (const staff_id of [inde, sala]) {
+    await req('/api/pro/sales', { method: 'POST', cookie: owner, body: { staff_id, method: 'card', tip_cents: 500, items: [{ kind: 'service', ref_id: sv }] } });
+  }
+  const month = process.env.LUMEA_NOW.slice(0, 7);
+  const rows = (await req(`/api/pro/earnings?month=${month}`, { cookie: owner })).body.rows;
+  const ri = rows.find((r) => r.staff_id === inde);
+  const rs = rows.find((r) => r.staff_id === sala);
+  assert.deepEqual([ri.collaborator_cents, ri.salon_cents], [10000 + 500 - 80000, 80000], 'chair rental: keeps revenue, pays rent');
+  assert.deepEqual([rs.collaborator_cents, rs.salon_cents], [4000 + 500, 6000], 'commission: 40 % of services + tips');
+
+  const token = (await req(`/api/pro/staff/${inde}/access`, { method: 'POST', cookie: owner, body: { email: 'inde@test.lu' } })).body.invite_url.split('t=')[1];
+  const ic = (await req('/api/auth/reset', { method: 'POST', body: { token, password: 'inde-pass-1' } })).cookie;
+  const mine = await req(`/api/pro/earnings?month=${month}`, { cookie: ic });
+  assert.equal(mine.body.rows.length, 1, 'a collaborator only sees their own earnings');
+  assert.equal((await req('/api/pro/me/hours', { method: 'PUT', cookie: ic, body: { hours: [{ weekday: 3, start: '10:00', end: '16:00' }] } })).status, 200);
+  assert.equal(one('SELECT COUNT(*) AS n FROM staff_hours WHERE staff_id = ? AND weekday = 3', inde).n, 1);
+
+  const st = (await req(`/api/pro/staff/${sala}/access`, { method: 'POST', cookie: owner, body: { email: 'sala@test.lu' } })).body.invite_url.split('t=')[1];
+  const sc = (await req('/api/auth/reset', { method: 'POST', body: { token: st, password: 'sala-pass-1' } })).cookie;
+  assert.equal((await req('/api/pro/me/hours', { method: 'PUT', cookie: sc, body: { hours: [] } })).status, 403, 'employees do not edit their own schedule');
+});

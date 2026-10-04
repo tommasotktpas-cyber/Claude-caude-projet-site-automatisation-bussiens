@@ -164,6 +164,9 @@ function seed() {
         // Demo employee account (sees only Hugo's agenda).
         const hugo = one("SELECT id FROM staff WHERE salon_id = ? AND name LIKE 'Hugo%'", salon.id);
         run("INSERT INTO users (email, password_hash, name, role, staff_id) VALUES ('hugo@lumea.app', ?, 'Hugo Martin', 'staff', ?)", demoPassword, hugo.id);
+        // Hugo rents his chair (independent); Inès earns a share of her services.
+        run("UPDATE staff SET employment = 'independant', pay_model = 'loyer', chair_rent_cents = 90000 WHERE id = ?", hugo.id);
+        run("UPDATE staff SET pay_model = 'commission', rate_percent = 45 WHERE salon_id = ? AND name LIKE 'Inès%'", salon.id);
       }
       const services = all('SELECT * FROM services WHERE salon_id = ?', salon.id);
       const staff = all('SELECT id FROM staff WHERE salon_id = ?', salon.id).map((s) => s.id);
