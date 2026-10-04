@@ -19,7 +19,7 @@ router.use(requireRole('pro', 'admin', 'staff'));
 
 // Employees (role "staff") only reach their own agenda, bookings and the client file.
 const STAFF_ALLOWED = [
-  ['GET', /^\/(salon|staff|services|agenda|slots|clients(\/\d+)?)$/],
+  ['GET', /^\/(salon|staff|services|agenda|slots|clients(\/\d+)?|bookings\/\d+\/style)$/],
   ['POST', /^\/bookings$/],
   ['PATCH', /^\/bookings\/\d+$/],
   ['PUT', /^\/clients\/\d+$/],
@@ -184,15 +184,18 @@ function serviceFields(b) {
   const price = Math.round(Number(b.price) * 100);
   if (!Number.isFinite(duration)) throw new HttpError(400, 'Durée invalide.');
   if (!Number.isFinite(price) || price < 0) throw new HttpError(400, 'Prix invalide.');
-  return { name, category: clean(b.category, 60) || 'Prestations', description: clean(b.description, 500), duration, price, active: b.active === false ? 0 : 1 };
+  return {
+    name, category: clean(b.category, 60) || 'Prestations', description: clean(b.description, 500), duration, price,
+    active: b.active === false ? 0 : 1, studio: b.studio ? 1 : 0,
+  };
 }
 
 router.post('/services', (req, res) => {
   const f = serviceFields(req.body || {});
   const id = tx(() => {
     const pos = one('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM services WHERE salon_id = ?', req.salon.id).p;
-    const sid = Number(run('INSERT INTO services (salon_id, name, category, description, duration_min, price_cents, active, position) VALUES (?,?,?,?,?,?,?,?)',
-      req.salon.id, f.name, f.category, f.description, f.duration, f.price, f.active, pos).lastInsertRowid);
+    const sid = Number(run('INSERT INTO services (salon_id, name, category, description, duration_min, price_cents, active, position, studio) VALUES (?,?,?,?,?,?,?,?,?)',
+      req.salon.id, f.name, f.category, f.description, f.duration, f.price, f.active, pos, f.studio).lastInsertRowid);
     // New services are offered by every active staff member by default.
     for (const s of all('SELECT id FROM staff WHERE salon_id = ? AND active = 1', req.salon.id)) {
       run('INSERT INTO staff_services (staff_id, service_id) VALUES (?,?)', s.id, sid);
@@ -204,8 +207,8 @@ router.post('/services', (req, res) => {
 
 router.put('/services/:id', (req, res) => {
   const f = serviceFields(req.body || {});
-  const r = run('UPDATE services SET name=?, category=?, description=?, duration_min=?, price_cents=?, active=? WHERE id=? AND salon_id=?',
-    f.name, f.category, f.description, f.duration, f.price, f.active, Number(req.params.id), req.salon.id);
+  const r = run('UPDATE services SET name=?, category=?, description=?, duration_min=?, price_cents=?, active=?, studio=? WHERE id=? AND salon_id=?',
+    f.name, f.category, f.description, f.duration, f.price, f.active, f.studio, Number(req.params.id), req.salon.id);
   if (!r.changes) throw new HttpError(404, 'Prestation introuvable.');
   res.json({ ok: true });
 });
@@ -336,7 +339,7 @@ router.get('/agenda', (req, res) => {
   const to = T.isDate(req.query.to) ? req.query.to : from;
   res.json({
     bookings: all(
-      `SELECT b.*, sv.name AS service_name, st.name AS staff_name, st.color AS staff_color,
+      `SELECT b.*, NULL AS style_image, (b.style_json IS NOT NULL) AS has_style, sv.name AS service_name, st.name AS staff_name, st.color AS staff_color,
               c.name AS client_name, c.phone AS client_phone, c.email AS client_email
        FROM bookings b JOIN services sv ON sv.id = b.service_id JOIN staff st ON st.id = b.staff_id JOIN clients c ON c.id = b.client_id
        WHERE b.salon_id = ? AND b.start_at >= ? AND b.start_at < ? AND (? = 0 OR b.staff_id = ?) ORDER BY b.start_at`,
@@ -541,6 +544,27 @@ router.get('/waitlist', (req, res) => {
   ));
 });
 
+
+// ---------- 3D haircut studio ----------
+
+router.get('/studio', (req, res) => {
+  const { STYLES, COLORS, FADES, BEARDS, catalogFor } = require('../styles');
+  res.json({ styles: STYLES, colors: COLORS, fades: FADES, beards: BEARDS, offered: catalogFor(req.salon).map((s) => s.id) });
+});
+
+router.put('/studio', (req, res) => {
+  const { STYLES } = require('../styles');
+  const ids = (Array.isArray(req.body?.offered) ? req.body.offered : []).filter((id) => STYLES.some((s) => s.id === id));
+  if (!ids.length) throw new HttpError(400, 'Choisissez au moins une coupe.');
+  run('UPDATE salons SET style_catalog = ? WHERE id = ?', JSON.stringify(ids), req.salon.id);
+  res.json({ ok: true });
+});
+
+router.get('/bookings/:id/style', (req, res) => {
+  const b = ownBooking(req);
+  const style = b.style_json ? JSON.parse(b.style_json) : null;
+  res.json({ style, image: b.style_image || null, summary: require('../styles').describeStyle(style) });
+});
 
 // ---------- Website (each salon has its own site) ----------
 

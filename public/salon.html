@@ -29,6 +29,7 @@
 
   <script src="/js/config.js"></script>
   <script src="/js/common.js"></script>
+  <script src="/js/studio-ui.js"></script>
   <script>
     'use strict';
     const params = new URLSearchParams(location.search);
@@ -132,9 +133,16 @@
     addEventListener('keydown', (e) => e.key === 'Escape' && closeDrawer());
 
     const staffFor = (serviceId) => data.staff.filter((p) => p.service_ids.includes(serviceId));
-    const steps = () => (bk.service && staffFor(bk.service.id).length <= 1 ? [1, 3, 4] : [1, 2, 3, 4]);
+    // 3.5 = Studio coupe 3D (only for services where the salon enabled it).
+    const steps = () => {
+      const list = bk.service && staffFor(bk.service.id).length <= 1 ? [1, 3, 4] : [1, 2, 3, 4];
+      if (bk.service?.studio) list.splice(list.indexOf(4), 0, 3.5);
+      return list;
+    };
+    let studioUi = null;
 
     function go(step) {
+      if (studioUi && step !== 3.5) { studioUi.dispose(); studioUi = null; }
       bk.step = step;
       const list = steps();
       $('#drawer-back').style.visibility = step > 1 && step < 5 ? 'visible' : 'hidden';
@@ -161,10 +169,28 @@
       } else if (step === 3) {
         $('#drawer-title').textContent = 'Date et heure';
         renderDateStep(progress);
+      } else if (step === 3.5) {
+        $('#drawer-title').textContent = 'Votre coupe en 3D';
+        renderStudioStep(progress);
       } else if (step === 4) {
         $('#drawer-title').textContent = 'Vos coordonnées';
         renderDetailsStep(progress);
       }
+    }
+
+    async function renderStudioStep(progress) {
+      $('#drawer-body').innerHTML = `${progress}
+        <p class="small muted" style="margin:0 0 12px">Montrez à ${esc(data.salon.name)} exactement ce que vous voulez : choisissez une coupe du salon, réglez les longueurs, la barbe et la couleur. Faites glisser la tête pour la tourner.</p>
+        <div id="studio-root"></div>`;
+      const foot = $('#drawer-foot');
+      foot.classList.remove('hidden');
+      foot.innerHTML = `<div class="row" style="flex-wrap:nowrap"><button class="btn btn-ghost" id="studio-skip">Passer</button><button class="btn btn-brand grow" id="studio-ok">Valider ma coupe</button></div>`;
+      $('#studio-skip').onclick = () => { bk.style = null; go(4); };
+      $('#studio-ok').onclick = () => {
+        if (studioUi) bk.style = { ...studioUi.getState(), image: studioUi.snapshot() };
+        go(4);
+      };
+      studioUi = await window.LumeaStudio.mount($('#studio-root'), { ...data.studio, initial: bk.style });
     }
 
     $('#drawer-back').onclick = () => {
@@ -189,7 +215,7 @@
       const day = e.target.closest('[data-day]');
       if (day) { bk.date = day.dataset.day; bk.time = null; return loadSlots(); }
       const slot = e.target.closest('[data-slot]');
-      if (slot) { bk.time = slot.dataset.slot; return go(4); }
+      if (slot) { bk.time = slot.dataset.slot; return go(bk.service.studio ? 3.5 : 4); }
     });
 
     function renderDateStep(progress) {
@@ -261,6 +287,11 @@
           <div class="muted"><span>Avec</span><span>${esc(staffName)}</span></div>
           ${deposit ? `<div style="border-top:1px solid var(--line);margin-top:6px;padding-top:8px"><span>Acompte à régler maintenant</span><b>${fmt.eur(deposit)}</b></div>` : ''}
         </div>
+        ${bk.style ? `<div class="style-sheet" style="margin-bottom:18px">${bk.style.image ? `<img src="${bk.style.image}" alt="Votre coupe en 3D">` : '<span></span>'}
+          <div class="small"><b>Votre coupe : ${esc(data.studio.styles.find((x) => x.id === bk.style.style)?.name || '')}</b>
+            <div class="muted">Dessus ${bk.style.params.top} cm · côtés ${bk.style.params.sides} cm · nuque ${bk.style.params.back} cm</div>
+            <div class="muted">Le salon recevra cette fiche avec votre rendez-vous.</div>
+            <button type="button" class="link" id="edit-style" style="margin-top:6px">Modifier ma coupe</button></div></div>` : ''}
         <form id="details-form" novalidate>
           <div class="field"><label for="f-name">Nom complet</label><input id="f-name" name="name" required autocomplete="name" value="${esc(user?.name || '')}"></div>
           <div class="grid-2">
@@ -276,6 +307,7 @@
       foot.classList.remove('hidden');
       foot.innerHTML = `<button class="btn btn-brand btn-lg btn-block" id="confirm-btn">${deposit ? `Payer ${fmt.eur(deposit)} et confirmer` : 'Confirmer le rendez-vous'}</button>`;
       $('#confirm-btn').onclick = submitBooking;
+      $('#edit-style')?.addEventListener('click', () => go(3.5));
     }
 
     async function submitBooking() {
@@ -291,7 +323,7 @@
       try {
         const res = await api(`/api/public/salons/${encodeURIComponent(slug)}/bookings`, {
           method: 'POST',
-          body: { service_id: bk.service.id, staff_id: bk.staff, date: bk.date, time: bk.time, source: embed ? 'widget' : 'online', customer: { ...f, marketing: !!f.marketing } },
+          body: { service_id: bk.service.id, staff_id: bk.staff, date: bk.date, time: bk.time, source: embed ? 'widget' : 'online', customer: { ...f, marketing: !!f.marketing }, style: bk.style || undefined },
         });
         if (res.checkout_url) {
           // Deposit: secure payment page (cards, TWINT, Apple / Google Pay). Checkout cannot run inside an iframe.
@@ -336,7 +368,7 @@
     document.addEventListener('click', (e) => {
       const b = e.target.closest('[data-book]');
       if (!b || !data) return;
-      bk.date = null; bk.time = null; bk.staff = null;
+      bk.date = null; bk.time = null; bk.staff = null; bk.style = null;
       if (b.dataset.book) {
         bk.service = data.services.find((x) => x.id === Number(b.dataset.book));
         go(staffFor(bk.service.id).length > 1 ? 2 : 3);

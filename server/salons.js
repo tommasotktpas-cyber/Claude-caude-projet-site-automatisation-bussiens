@@ -2,6 +2,7 @@
 const { one, run } = require('./db');
 const T = require('./time');
 const { randomToken } = require('./auth');
+const { STUDIO_SERVICE_RE } = require('./styles');
 
 const CATEGORIES = ['coiffure', 'barbier', 'esthetique', 'ongles', 'spa', 'massage'];
 const TRIAL_DAYS = 30;
@@ -38,8 +39,9 @@ function createSalon(ownerId, data) {
     { name: 'Prestation découverte', category: 'Prestations', duration_min: 30, price_cents: 3000 },
   ];
   const serviceIds = services.map((s, i) => Number(run(
-    'INSERT INTO services (salon_id, name, category, description, duration_min, price_cents, position) VALUES (?,?,?,?,?,?,?)',
+    'INSERT INTO services (salon_id, name, category, description, duration_min, price_cents, position, studio) VALUES (?,?,?,?,?,?,?,?)',
     salonId, s.name, s.category || 'Prestations', s.description || '', s.duration_min, s.price_cents, i,
+    ['coiffure', 'barbier'].includes(category) && STUDIO_SERVICE_RE.test(`${s.name} ${s.category || ''}`) ? 1 : 0,
   ).lastInsertRowid));
 
   const staff = data.staff || [{ name: data.owner_name || 'Gérant(e)', title: 'Fondateur·rice' }];

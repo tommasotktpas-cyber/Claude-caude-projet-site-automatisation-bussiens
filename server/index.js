@@ -44,6 +44,12 @@ function createApp() {
     res.type('html').send(sites.renderSalonSite(salon));
   });
 
+  // 3D studio engine (three.js served locally: no third-party CDN needed).
+  app.get('/vendor/three.module.min.js', (_req, res) => {
+    res.setHeader('Cache-Control', 'public, max-age=604800');
+    res.sendFile(path.join(__dirname, '..', 'node_modules', 'three', 'build', 'three.module.min.js'));
+  });
+
   app.get('/js/config.js', (_req, res) => {
     res.type('application/javascript').send(`window.LUMEA_CONFIG = ${JSON.stringify({ currency: CURRENCY })};`);
   });

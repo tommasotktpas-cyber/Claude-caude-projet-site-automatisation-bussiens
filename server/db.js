@@ -267,6 +267,19 @@ addColumn('bookings', 'stripe_session_id', 'TEXT');
 addColumn('bookings', 'stripe_payment_intent', 'TEXT');
 addColumn('template_licenses', 'stripe_subscription_id', 'TEXT');
 addColumn('users', 'staff_id', 'INTEGER REFERENCES staff(id) ON DELETE SET NULL');
+// 3D haircut studio: per-service switch, per-salon list of offered cuts, client's style sheet on the booking.
+{
+  const hadStudio = db.prepare('PRAGMA table_info(services)').all().some((c) => c.name === 'studio');
+  addColumn('services', 'studio', 'INTEGER NOT NULL DEFAULT 0');
+  if (!hadStudio) {
+    const { STUDIO_SERVICE_RE } = require('./styles');
+    const rows = db.prepare("SELECT sv.id, sv.name, sv.category FROM services sv JOIN salons s ON s.id = sv.salon_id WHERE s.category IN ('coiffure','barbier')").all();
+    for (const r of rows) if (STUDIO_SERVICE_RE.test(`${r.name} ${r.category}`)) db.prepare('UPDATE services SET studio = 1 WHERE id = ?').run(r.id);
+  }
+}
+addColumn('salons', 'style_catalog', "TEXT NOT NULL DEFAULT ''");
+addColumn('bookings', 'style_json', 'TEXT');
+addColumn('bookings', 'style_image', 'TEXT');
 db.exec(`CREATE TABLE IF NOT EXISTS stripe_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
 
 /** Runs fn inside an IMMEDIATE transaction (serialises writers — prevents double booking). */

@@ -275,3 +275,42 @@ test('employee accounts only see their own agenda', async () => {
   await req(`/api/pro/staff/${alice}/access`, { method: 'DELETE', cookie: owner });
   assert.equal((await req('/api/pro/agenda', { cookie })).status, 401, 'revoked account is logged out');
 });
+
+test('3D studio: style sheet saved with the booking, only offered cuts, visible to the barber', async () => {
+  const uid = Number(run("INSERT INTO users (email, password_hash, name, role) VALUES ('barber@test.lu', ?, 'Owner', 'pro')", hashPassword('password123')).lastInsertRowid);
+  const salon = createSalon(uid, {
+    name: 'Barber Studio', city: 'Lausanne', category: 'barbier',
+    hours: [{ weekday: 2, open: '09:00', close: '12:00' }],
+    services: [{ name: 'Coupe dégradé', duration_min: 30, price_cents: 3500 }, { name: 'Soin visage', duration_min: 30, price_cents: 3000 }],
+    staff: [{ name: 'Karim' }],
+  });
+  const [cut, facial] = require('../server/db').all('SELECT id, studio FROM services WHERE salon_id = ? ORDER BY id', salon.id);
+  assert.equal(cut.studio, 1, 'hair services get the studio automatically');
+  assert.equal(facial.studio, 0);
+  run('UPDATE salons SET style_catalog = ? WHERE id = ?', JSON.stringify(['fade', 'crew']), salon.id);
+  const page = await req(`/api/public/salons/${salon.slug}`);
+  assert.deepEqual(page.body.studio.styles.map((s) => s.id), ['crew', 'fade']);
+
+  const style = { style: 'fade', params: { top: 3.5, sides: 0, back: 99, fade: 'skin', beard: 'short', color: '#16110e' }, note: 'Raie à gauche', image: 'data:image/jpeg;base64,AAAA' };
+  const b = await req(`/api/public/salons/${salon.slug}/bookings`, { method: 'POST', body: { service_id: cut.id, date: TUE, time: '09:00', customer, style } });
+  assert.equal(b.status, 201);
+  const row = one('SELECT style_json, style_image FROM bookings WHERE id = ?', b.body.id);
+  const saved = JSON.parse(row.style_json);
+  assert.equal(saved.params.back, 50, 'lengths are clamped');
+  assert.equal(saved.params.color_name, 'Noir');
+  assert.equal(row.style_image, 'data:image/jpeg;base64,AAAA');
+
+  const notOffered = await req(`/api/public/salons/${salon.slug}/bookings`, { method: 'POST', body: { service_id: cut.id, date: TUE, time: '10:00', customer, style: { ...style, style: 'afro' } } });
+  assert.equal(one('SELECT style_json FROM bookings WHERE id = ?', notOffered.body.id).style_json, null, 'cuts the salon does not offer are ignored');
+  const facialBooking = await req(`/api/public/salons/${salon.slug}/bookings`, { method: 'POST', body: { service_id: facial.id, date: TUE, time: '11:00', customer, style } });
+  assert.equal(one('SELECT style_json FROM bookings WHERE id = ?', facialBooking.body.id).style_json, null);
+
+  const owner = (await req('/api/auth/login', { method: 'POST', body: { email: 'barber@test.lu', password: 'password123' } })).cookie;
+  const agenda = await req(`/api/pro/agenda?from=${TUE}&to=${TUE}`, { cookie: owner });
+  const withStyle = agenda.body.bookings.find((x) => x.id === b.body.id);
+  assert.equal(withStyle.has_style, 1);
+  assert.equal(withStyle.style_image, null, 'agenda stays light');
+  const sheet = await req(`/api/pro/bookings/${b.body.id}/style`, { cookie: owner });
+  assert.match(sheet.body.summary, /Dégradé américain · dessus 3.5 cm/);
+  assert.match(sheet.body.summary, /barbe courte/);
+});

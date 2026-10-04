@@ -53,7 +53,8 @@ const templates = {
   }),
   new_booking_pro: (b) => ({
     subject: `Nouveau rendez-vous : ${b.client_name}`,
-    body: `${b.client_name} a réservé « ${b.service_name} » avec ${b.staff_name} le ${frDate(b.start_at)}. Tél : ${b.client_phone || '—'}`,
+    body: `${b.client_name} a réservé « ${b.service_name} » avec ${b.staff_name} le ${frDate(b.start_at)}. Tél : ${b.client_phone || '—'}`
+      + (b.style_json ? `\nCoupe souhaitée (studio 3D) : ${require('./styles').describeStyle(JSON.parse(b.style_json))}` : ''),
   }),
 };
 

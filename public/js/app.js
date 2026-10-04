@@ -177,7 +177,7 @@ function renderDayGrid(date, staff, bookings, data) {
       const top = (dateUtil.toMin(b.start_at.slice(11, 16)) - startMin) * PX_PER_MIN;
       const height = Math.max(22, (dateUtil.toMin(b.end_at.slice(11, 16)) - dateUtil.toMin(b.start_at.slice(11, 16))) * PX_PER_MIN - 2);
       return `<div class="appt ${b.status}" style="--c:${esc(b.staff_color)};top:${top}px;height:${height}px" data-booking="${b.id}" title="${esc(b.client_name)} — ${esc(b.service_name)}">
-        <b>${b.start_at.slice(11, 16)} · ${esc(b.client_name)}</b>${esc(b.service_name)}${b.source !== 'pro' ? ' <span title="Réservé en ligne">🌐</span>' : ''}${b.deposit_cents ? ' 💳' : ''}</div>`;
+        <b>${b.start_at.slice(11, 16)} · ${esc(b.client_name)}</b>${esc(b.service_name)}${b.source !== 'pro' ? ' <span title="Réservé en ligne">🌐</span>' : ''}${b.deposit_cents ? ' 💳' : ''}${b.has_style ? ' <span title="Fiche coupe 3D">✂️</span>' : ''}</div>`;
     }).join('');
     const offs = data.time_off.filter((t) => t.staff_id === s.id).map((t) => {
       const st = t.start_at.slice(0, 10) < date ? startMin : dateUtil.toMin(t.start_at.slice(11, 16));
@@ -345,9 +345,19 @@ function bookingDetail(b, after) {
         <div><span class="muted">E-mail</span>${realEmail ? `<a href="mailto:${esc(b.client_email)}">${esc(b.client_email)}</a>` : '—'}</div>
       </div>
       <div class="field" style="margin-top:14px"><label for="bd-notes">Note</label><textarea id="bd-notes">${esc(b.notes)}</textarea></div>
+      <div id="bd-style"></div>
       <button class="link small" id="bd-client">Voir la fiche client →</button>`,
     actions,
-    onOpen: (d) => { $('#bd-client', d).onclick = () => { d.close(); d.remove(); clientDetail(b.client_id); }; },
+    onOpen: (d) => {
+      $('#bd-client', d).onclick = () => { d.close(); d.remove(); clientDetail(b.client_id); };
+      if (b.has_style) {
+        api(P(`/bookings/${b.id}/style`)).then((st) => {
+          if (!st.style) return;
+          $('#bd-style', d).innerHTML = `<div class="style-sheet" style="margin:4px 0 12px">${st.image ? `<img src="${st.image}" alt="Coupe souhaitée en 3D">` : '<span></span>'}
+            <div class="small"><b>Coupe souhaitée (studio 3D)</b><div style="margin-top:4px">${esc(st.summary)}</div>${st.style.note ? `<div class="muted" style="margin-top:6px">« ${esc(st.style.note)} »</div>` : ''}</div></div>`;
+        }).catch(() => {});
+      }
+    },
   });
 }
 
@@ -498,12 +508,13 @@ function serviceForm(s = null) {
         <div class="field"><label>Catégorie</label><input name="category" list="cats" value="${esc(s?.category || 'Prestations')}"><datalist id="cats">${cats.map((c) => `<option>${esc(c)}</option>`).join('')}</datalist></div>
       </div>
       <div class="field"><label>Description <span class="muted">(facultatif)</span></label><input name="description" value="${esc(s?.description || '')}"></div>
-      <label class="check"><input type="checkbox" name="active" ${!s || s.active ? 'checked' : ''}> Réservable en ligne</label></form>`,
+      <label class="check"><input type="checkbox" name="active" ${!s || s.active ? 'checked' : ''}> Réservable en ligne</label>
+      <label class="check"><input type="checkbox" name="studio" ${s?.studio ? 'checked' : ''}> Proposer le Studio coupe 3D au client lors de la réservation</label></form>`,
     actions: [{ id: 'close', label: 'Annuler', cls: 'btn-ghost' }, {
       id: 'save', label: 'Enregistrer', cls: 'btn-brand',
       handler: async (d) => {
         const f = formData($('#sf', d));
-        const body = { ...f, active: !!f.active };
+        const body = { ...f, active: !!f.active, studio: !!f.studio };
         await api(P(s ? `/services/${s.id}` : '/services'), { method: s ? 'PUT' : 'POST', body });
         toast('Prestation enregistrée.');
         renderServices();
@@ -716,6 +727,7 @@ async function renderSettings() {
       </form>
       <div class="stack">
         <form class="card" id="hours-form"><h3>Horaires d’ouverture</h3>${hoursEditor(ctx.salonFull.hours, 'open', 'close')}<button class="btn btn-brand" style="margin-top:12px">Enregistrer les horaires</button></form>
+        <div class="card" id="studio-card"><h3>Studio coupe 3D</h3><p class="small muted">Chargement…</p></div>
         <div class="card" id="payments-card"><h3>Paiements en ligne (acomptes)</h3><p class="small muted">Chargement…</p></div>
         <div class="card"><h3>Partager & intégrer</h3>
           <div class="field"><label>Lien de réservation (Instagram, Google, SMS)</label><div class="row" style="flex-wrap:nowrap"><input readonly value="${esc(links.page)}" id="l-page"><button class="btn btn-ghost btn-sm" data-copy="l-page">Copier</button></div></div>
@@ -731,6 +743,38 @@ async function renderSettings() {
     f.published = !!f.published;
     try { await api(P('/salon'), { method: 'PUT', body: f }); toast('Paramètres enregistrés.'); await refreshCtx(); } catch (err) { toast(err.message, 'error'); }
   };
+  api(P('/studio')).then((st) => {
+    const card = $('#studio-card');
+    if (!card) return;
+    const groups = {};
+    for (const x of st.styles) (groups[x.group] ||= []).push(x);
+    card.innerHTML = `<h3>Studio coupe 3D</h3>
+      <p class="small muted">Vos clients règlent leur coupe sur une tête 3D au moment de réserver, parmi les coupes que vous proposez. Vous recevez l’image et les longueurs dans l’agenda. Activez-le par prestation dans <a href="#services">Prestations</a>.</p>
+      <div class="stack">${Object.entries(groups).map(([g, list]) => `<div><div class="small muted" style="font-weight:600">${esc(g)}</div>
+        <div class="grid-2">${list.map((x) => `<label class="check small"><input type="checkbox" data-style-id="${x.id}" ${st.offered.includes(x.id) ? 'checked' : ''}> ${esc(x.name)}</label>`).join('')}</div></div>`).join('')}</div>
+      <div class="row" style="margin-top:12px"><button class="btn btn-brand btn-sm" id="save-styles">Enregistrer mes coupes</button><button class="btn btn-ghost btn-sm" id="try-studio">Essayer le studio</button></div>`;
+    $('#save-styles').onclick = async () => {
+      try {
+        await api(P('/studio'), { method: 'PUT', body: { offered: $$('[data-style-id]:checked', card).map((c) => c.dataset.styleId) } });
+        toast('Coupes proposées enregistrées.');
+      } catch (err) { toast(err.message, 'error'); }
+    };
+    $('#try-studio').onclick = () => {
+      let ui;
+      modal({
+        title: 'Studio coupe 3D — aperçu client',
+        body: '<div id="studio-preview"></div>',
+        actions: [{ id: 'close', label: 'Fermer', cls: 'btn-ghost' }],
+        onOpen: async (d) => {
+          d.style.width = 'min(980px, 96vw)';
+          const offered = st.styles.filter((x) => $$('[data-style-id]:checked', card).some((c) => c.dataset.styleId === x.id));
+          ui = await window.LumeaStudio.mount($('#studio-preview', d), { styles: offered.length ? offered : st.styles, colors: st.colors, fades: st.fades, beards: st.beards });
+          $('.studio', d).classList.add('wide');
+          d.addEventListener('close', () => ui?.dispose());
+        },
+      });
+    };
+  }).catch(() => {});
   api(P('/payments')).then((p) => {
     const card = $('#payments-card');
     if (!card) return;

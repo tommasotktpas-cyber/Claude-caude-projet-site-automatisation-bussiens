@@ -100,7 +100,11 @@ router.get('/salons/:slug', (req, res) => {
   const links = all('SELECT ss.staff_id, ss.service_id FROM staff_services ss JOIN staff s ON s.id = ss.staff_id WHERE s.salon_id = ?', salon.id);
   res.json({
     salon: { ...publicSalon(salon), ...withRating },
-    services: all('SELECT id, name, category, description, duration_min, price_cents FROM services WHERE salon_id = ? AND active = 1 ORDER BY position, id', salon.id),
+    services: all('SELECT id, name, category, description, duration_min, price_cents, studio FROM services WHERE salon_id = ? AND active = 1 ORDER BY position, id', salon.id),
+    studio: (() => {
+      const st = require('../styles');
+      return { styles: st.catalogFor(salon), colors: st.COLORS, fades: st.FADES, beards: st.BEARDS };
+    })(),
     staff: staff.map((s) => ({ ...s, service_ids: links.filter((l) => l.staff_id === s.id).map((l) => l.service_id) })),
     hours: all('SELECT weekday, open, close FROM opening_hours WHERE salon_id = ? ORDER BY weekday, open', salon.id),
     reviews: all('SELECT rating, comment, reply, author_name, created_at FROM reviews WHERE salon_id = ? ORDER BY created_at DESC LIMIT 30', salon.id),
@@ -132,6 +136,7 @@ router.post('/salons/:slug/bookings', rateLimit('book', 20, 10 * 60 * 1000), asy
     customer: b.customer,
     userId: req.user?.id ?? null,
     source: b.source === 'widget' ? 'widget' : 'online',
+    style: b.style,
   });
   if (booking.payment_status === 'pending') {
     try {

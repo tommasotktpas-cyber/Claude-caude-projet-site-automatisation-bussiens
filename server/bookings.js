@@ -49,7 +49,7 @@ function upsertClient(salonId, customer, userId) {
  * Creates a booking atomically: availability is re-checked inside an IMMEDIATE transaction,
  * so two clients can never grab the same slot.
  */
-function createBooking({ salonId, serviceId, staffId = null, date, time, customer, userId = null, source = 'online', force = false }) {
+function createBooking({ salonId, serviceId, staffId = null, date, time, customer, userId = null, source = 'online', force = false, style = null }) {
   if (!T.isDate(date) || !T.isTime(time)) throw new HttpError(400, 'Date ou heure invalide.');
   const cust = validateCustomer(customer, { requireEmail: source !== 'pro' });
   const salon = one('SELECT * FROM salons WHERE id = ?', salonId);
@@ -84,6 +84,12 @@ function createBooking({ salonId, serviceId, staffId = null, date, time, custome
     ).lastInsertRowid);
   });
 
+  // Client's 3D style sheet (only for services where the salon enabled the studio).
+  const sheet = service.studio ? require('./styles').sanitizeStyle(style, salon) : null;
+  if (sheet) {
+    const { image, ...rest } = sheet;
+    run('UPDATE bookings SET style_json = ?, style_image = ? WHERE id = ?', JSON.stringify(rest), image || null, id);
+  }
   const booking = one('SELECT * FROM bookings WHERE id = ?', id);
   if (booking.payment_status !== 'pending') {
     notify('confirmation', id);
