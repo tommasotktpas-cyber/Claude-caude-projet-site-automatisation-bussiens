@@ -80,6 +80,13 @@ function createApp() {
   app.get('/api/templates', (_req, res) => res.json(sites.templateCatalog(null)));
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, now: T.now().iso }));
+  // Caddy "on-demand TLS" asks here before issuing a certificate: only for our domain and salons' custom domains.
+  app.get('/api/internal/domain-check', (req, res) => {
+    const domain = String(req.query.domain || '').toLowerCase();
+    const own = (process.env.APP_URL || '').replace(/^https?:\/\//, '').replace(/[:/].*$/, '').toLowerCase();
+    const ok = (own && (domain === own || domain === `www.${own}`)) || !!sites.siteByDomain(domain);
+    res.status(ok ? 200 : 404).end();
+  });
   app.use('/api/auth', require('./routes/auth'));
   app.use('/api/public', require('./routes/public'));
   app.use('/api/pro', require('./routes/pro'));
@@ -150,6 +157,7 @@ if (require.main === module) {
   setInterval(() => {
     try { runAutomations(); } catch (err) { console.error('[automations]', err); }
   }, 60 * 1000).unref();
+  setInterval(() => { try { require('./backup').maybeBackup(); } catch (err) { console.error('[backup]', err); } }, 10 * 60 * 1000).unref();
   setInterval(() => require('./report').runDailyReports().catch((err) => console.error('[report]', err)), 5 * 60 * 1000).unref();
   setInterval(() => require('./mail').syncAll().catch((err) => console.error('[mail]', err)), 10 * 60 * 1000).unref();
 }

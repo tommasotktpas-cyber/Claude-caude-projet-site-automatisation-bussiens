@@ -1,5 +1,5 @@
 node_modules
-data/*.db*
-data/secret
+data
 .env
 .git
+tests

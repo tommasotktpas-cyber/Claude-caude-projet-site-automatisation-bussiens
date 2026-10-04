@@ -1,0 +1,39 @@
+# Production: the app + Caddy (automatic HTTPS, also for salons' own domains).
+#   cp .env.example .env   # then fill DOMAIN, ACME_EMAIL, APP_URL, ADMIN_PASSWORD, keys…
+#   docker compose up -d --build
+services:
+  app:
+    build: .
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DB_PATH: /app/data/lumea.db
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

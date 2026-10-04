@@ -105,3 +105,10 @@ test('expenses, monthly result, VAT due and journal export', async () => {
   assert.ok(lines.some((l) => l.includes('"Recette"') && l.includes('"108.10"')));
   assert.ok(lines.some((l) => l.includes('"2026-0002"')));
 });
+
+test('on-demand TLS only for known domains', async () => {
+  assert.equal((await fetch(`${base}/api/internal/domain-check?domain=evil.example.com`)).status, 404);
+  run("UPDATE sites SET custom_domain = 'salon-compta.ch', published = 1 WHERE salon_id = ?", salon.id);
+  run("UPDATE salons SET plan = 'premium' WHERE id = ?", salon.id);
+  assert.equal((await fetch(`${base}/api/internal/domain-check?domain=salon-compta.ch`)).status, 200);
+});

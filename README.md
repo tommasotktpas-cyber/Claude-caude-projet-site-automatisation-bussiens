@@ -141,15 +141,12 @@ Copiez `.env.example` et renseignez les variables (via votre hébergeur ou `node
 
 ## Déploiement
 
+Guide complet (serveur, HTTPS automatique, domaines des salons, sauvegardes) : **[DEPLOIEMENT.md](DEPLOIEMENT.md)**.
+
 ```bash
-docker build -t lumea .
-docker run -d -p 3000:3000 -v lumea-data:/app/data \
-  -e APP_URL=https://reservation.mondomaine.com -e ADMIN_PASSWORD='…' -e SEED_DEMO=0 lumea
+cp .env.example .env    # DOMAIN, APP_URL, ADMIN_PASSWORD, clés…
+docker compose up -d --build
 ```
-
-Fonctionne sur tout hébergeur Node avec disque persistant (Render, Railway, Fly.io, VPS). Sauvegardez le dossier `data/`.
-
-**Domaines des salons (Premium)** : le salon crée un CNAME `www` vers votre serveur et saisit son domaine dans « Mon site ». Il faut aussi un certificat HTTPS pour ce domaine : utilisez un reverse-proxy à certificats automatiques (Caddy « on-demand TLS », Cloudflare for SaaS, ou Render / Fly custom domains).
 
 ## Mise en production — étapes à suivre
 

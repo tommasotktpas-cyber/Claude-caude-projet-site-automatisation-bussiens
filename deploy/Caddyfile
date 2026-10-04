@@ -1,0 +1,21 @@
+{
+	email {$ACME_EMAIL}
+	# Certificates for salons' own domains (www.mon-salon.ch) are issued on first visit,
+	# only if Lumea confirms the domain belongs to a published Premium site.
+	on_demand_tls {
+		ask http://app:3000/api/internal/domain-check
+	}
+}
+
+{$DOMAIN}, www.{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:3000
+}
+
+https:// {
+	tls {
+		on_demand
+	}
+	encode zstd gzip
+	reverse_proxy app:3000
+}
