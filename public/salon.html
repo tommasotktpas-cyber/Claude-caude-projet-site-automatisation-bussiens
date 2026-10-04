@@ -295,8 +295,12 @@
         });
         if (res.checkout_url) {
           // Deposit: secure payment page (cards, TWINT, Apple / Google Pay). Checkout cannot run inside an iframe.
-          btn.textContent = 'Redirection vers le paiement sécurisé…';
-          try { window.top.location.href = res.checkout_url; } catch { window.open(res.checkout_url, '_blank'); }
+          let sameOriginTop = window.top === window;
+          try { sameOriginTop = sameOriginTop || window.top.location.origin === location.origin; } catch { /* third-party site */ }
+          if (sameOriginTop) window.top.location.href = res.checkout_url;
+          else window.open(res.checkout_url, '_blank', 'noopener');
+          $('#drawer-foot').innerHTML = `<a class="btn btn-brand btn-lg btn-block" href="${esc(res.checkout_url)}" target="_blank" rel="noopener">Payer l’acompte</a>
+            <p class="small muted center" style="margin:8px 0 0">Créneau réservé 30 minutes. Si la page de paiement ne s’est pas ouverte, cliquez ci-dessus.</p>`;
           return;
         }
         showSuccess(res.token);
