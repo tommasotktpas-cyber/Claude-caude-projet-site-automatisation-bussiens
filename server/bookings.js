@@ -104,9 +104,10 @@ function createBooking({ salonId, serviceId, staffId = null, date, time, custome
   return booking;
 }
 
-function cancelBooking(booking, { byClient = false } = {}) {
+function cancelBooking(booking, { byClient = false, late = false } = {}) {
   if (booking.status !== 'confirmed') throw new HttpError(400, 'Ce rendez-vous ne peut plus être annulé.');
-  if (byClient) {
+  // late: the client cancels after the free-cancellation window (e.g. by SMS). The slot is freed, the deposit is kept.
+  if (byClient && !late) {
     const salon = one('SELECT cancel_hours FROM salons WHERE id = ?', booking.salon_id);
     if (T.diffMinutes(T.now().iso, booking.start_at) < salon.cancel_hours * 60) {
       throw new HttpError(400, `Annulation en ligne possible jusqu’à ${salon.cancel_hours} h avant le rendez-vous. Merci de contacter le salon.`);
@@ -114,7 +115,7 @@ function cancelBooking(booking, { byClient = false } = {}) {
   }
   run("UPDATE bookings SET status = 'cancelled' WHERE id = ?", booking.id);
   // Cancelled within the allowed window (or by the salon): the deposit goes back to the client.
-  if (booking.payment_status === 'paid') require('./billing').refundDeposit(booking);
+  if (booking.payment_status === 'paid' && !late) require('./billing').refundDeposit(booking);
   if (booking.payment_status !== 'pending') notify('cancelled', booking.id);
   notifyWaitlist(booking.salon_id, booking.service_id, booking.start_at.slice(0, 10));
 }

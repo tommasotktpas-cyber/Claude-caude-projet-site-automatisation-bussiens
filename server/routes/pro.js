@@ -998,7 +998,7 @@ router.post('/assistant/test', async (req, res) => {
 });
 
 const convRow = (c) => ({
-  id: c.id, channel: c.channel, contact_form: c.external_id.startsWith('contact-'), customer_name: c.customer_name, customer_phone: c.customer_phone, outcome: c.outcome, summary: c.summary,
+  id: c.id, channel: c.channel, contact_form: /^(contact|sms)-/.test(c.external_id), via: c.external_id.startsWith('sms-') ? 'sms' : c.external_id.startsWith('contact-') ? 'contact' : c.channel, customer_name: c.customer_name, customer_phone: c.customer_phone, outcome: c.outcome, summary: c.summary,
   status: c.status, unread: c.unread, human_mode: c.human_mode, booking_id: c.booking_id, created_at: c.created_at, updated_at: c.updated_at,
   last: (JSON.parse(c.transcript).at(-1) || {}).text || '',
 });

@@ -423,6 +423,8 @@ CREATE INDEX IF NOT EXISTS idx_ai_conv_salon ON ai_conversations (salon_id, upda
 addColumn('ai_conversations', 'human_mode', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('ai_conversations', 'unread', 'INTEGER NOT NULL DEFAULT 0');
 
+// Two-way SMS: the client answers the reminder with 1 (confirm) or 2 (cancel).
+addColumn('bookings', 'client_confirmed', 'INTEGER NOT NULL DEFAULT 0');
 // Morning briefing e-mail.
 addColumn('salons', 'daily_report_enabled', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('salons', 'daily_report_hour', 'INTEGER NOT NULL DEFAULT 7');

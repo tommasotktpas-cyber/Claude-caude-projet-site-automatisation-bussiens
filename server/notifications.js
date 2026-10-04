@@ -81,12 +81,16 @@ function notify(kind, bookingId) {
 
   for (const r of recipients) {
     if (!r.to || r.to.endsWith('.invalid')) continue;
+    // SMS reminder: short, and asks for a 1 / 2 answer when two-way SMS is set up.
+    const text = r.channel === 'sms' && kind === 'reminder'
+      ? `${b.salon_name} : rappel de votre RDV « ${b.service_name} » le ${frDate(b.start_at)}.${require('./mailer').twilioSms() ? ' Répondez 1 pour confirmer, 2 pour annuler.' : ` Déplacer : ${APP_URL}/rdv.html?t=${b.token}`}`
+      : body;
     const info = run(
       'INSERT INTO notifications (salon_id, booking_id, kind, channel, recipient, subject, body) VALUES (?,?,?,?,?,?,?)',
-      b.salon_id, b.id, kind, r.channel, r.to, subject, body,
+      b.salon_id, b.id, kind, r.channel, r.to, subject, text,
     );
     deliver(info.lastInsertRowid, {
-      kind, channel: r.channel, to: r.to, subject, body, booking_id: b.id, salon_id: b.salon_id,
+      kind, channel: r.channel, to: r.to, subject, body: text, booking_id: b.id, salon_id: b.salon_id,
       fromName: toPro ? 'Lumea Pro' : b.salon_name, replyTo: toPro ? undefined : b.salon_email || undefined,
     });
   }

@@ -9,6 +9,19 @@ const MAIL_FROM = process.env.MAIL_FROM || 'no-reply@lumea.app';
 const MAIL_FROM_NAME = process.env.MAIL_FROM_NAME || 'Lumea';
 const SMS_SENDER = (process.env.SMS_SENDER || 'Lumea').replace(/[^A-Za-z0-9]/g, '').slice(0, 11);
 const WEBHOOK = process.env.NOTIFY_WEBHOOK_URL || '';
+// Two-way SMS through Twilio (clients can answer 1 / 2 to a reminder) when a sending number is configured.
+const twilioSms = () => !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_SMS_FROM);
+
+async function twilio(to, body) {
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+    method: 'POST',
+    headers: { Authorization: `Basic ${Buffer.from(`${sid}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ To: `+${to}`, From: process.env.TWILIO_SMS_FROM, Body: body.slice(0, 640) }),
+  });
+  if (!res.ok) throw new Error(`Twilio ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  return true;
+}
 
 /** "+41 79 123 45 67" / "079 123 45 67" -> "41791234567" (Brevo expects digits with country code). */
 function normalizePhone(raw, defaultCountry = process.env.SMS_DEFAULT_COUNTRY || '41') {
@@ -40,7 +53,10 @@ async function brevo(path, body) {
  */
 async function send(msg) {
   let delivered = false;
-  if (BREVO_KEY) {
+  if (msg.channel === 'sms' && twilioSms()) {
+    const recipient = normalizePhone(msg.to);
+    try { if (recipient) delivered = await twilio(recipient, msg.body); } catch (err) { console.error('[mailer]', err.message); }
+  } else if (BREVO_KEY) {
     try {
       if (msg.channel === 'email') {
         delivered = await brevo('/smtp/email', {
@@ -74,6 +90,6 @@ async function send(msg) {
   return delivered;
 }
 
-const configured = () => ({ brevo: !!BREVO_KEY, webhook: !!WEBHOOK });
+const configured = () => ({ brevo: !!BREVO_KEY, webhook: !!WEBHOOK, twoWaySms: twilioSms() });
 
-module.exports = { send, normalizePhone, configured };
+module.exports = { send, normalizePhone, configured, twilioSms };

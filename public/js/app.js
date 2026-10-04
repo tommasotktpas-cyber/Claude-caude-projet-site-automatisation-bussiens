@@ -357,7 +357,7 @@ function bookingDetail(b, after) {
   modal({
     title: `${b.client_name}`,
     body: `
-      <div class="row" style="margin-bottom:12px"><span class="badge ${st.cls}">${st.label}</span><span class="badge">${{ online: 'Réservé en ligne', widget: 'Via widget site', pro: 'Saisi au salon' }[b.source]}</span>${b.deposit_cents ? `<span class="badge ${b.payment_status === 'pending' ? 'badge-warn' : b.payment_status === 'refunded' ? '' : 'badge-ok'}">Acompte ${fmt.eur(b.deposit_cents)} · ${{ pending: 'en attente de paiement', paid: 'payé', refunded: 'remboursé', none: 'enregistré' }[b.payment_status] || ''}</span>` : ''}</div>
+      <div class="row" style="margin-bottom:12px"><span class="badge ${st.cls}">${st.label}</span><span class="badge">${{ online: 'Réservé en ligne', widget: 'Via widget site', pro: 'Saisi au salon', phone: 'Pris par l’assistant IA', chat: 'Pris via le chat' }[b.source]}</span>${b.client_confirmed ? '<span class="badge badge-ok">✓ Confirmé par SMS</span>' : ''}${b.deposit_cents ? `<span class="badge ${b.payment_status === 'pending' ? 'badge-warn' : b.payment_status === 'refunded' ? '' : 'badge-ok'}">Acompte ${fmt.eur(b.deposit_cents)} · ${{ pending: 'en attente de paiement', paid: 'payé', refunded: 'remboursé', none: 'enregistré' }[b.payment_status] || ''}</span>` : ''}</div>
       <div class="summary">
         <div><span class="muted">Prestation</span><b>${esc(b.service_name)}</b></div>
         <div><span class="muted">Quand</span><span>${fmt.dateTime(b.start_at)} – ${fmt.time(b.end_at)}</span></div>
@@ -1554,12 +1554,12 @@ async function openConversation() {
   const { conversation: c, messages } = await api(P(`/conversations/${msgState.open}`));
   $$('.conv-item').forEach((el) => el.classList.toggle('active', Number(el.dataset.conv) === c.id));
   pane.innerHTML = `<div class="row between"><div><h3 style="margin:0">${esc(c.customer_name || (c.channel === 'phone' ? 'Appel entrant' : 'Visiteur du site'))}</h3>
-      <div class="small muted">${c.channel === 'phone' ? 'Appel téléphonique' : c.contact_form ? 'Formulaire de contact' : 'Chat du site'}${c.customer_phone ? ` · <a href="tel:${esc(c.customer_phone)}">${esc(c.customer_phone)}</a>` : ''}</div></div>
+      <div class="small muted">${c.channel === 'phone' ? 'Appel téléphonique' : c.via === 'sms' ? 'Réponse au SMS de rappel' : c.contact_form ? 'Formulaire de contact' : 'Chat du site'}${c.customer_phone ? ` · <a href="tel:${esc(c.customer_phone)}">${esc(c.customer_phone)}</a>` : ''}</div></div>
       <div class="row" style="gap:6px">${c.status !== 'done' ? '<button class="btn btn-ghost btn-sm" id="conv-done">Marquer traité</button>' : '<button class="btn btn-ghost btn-sm" id="conv-reopen">Rouvrir</button>'}
       ${c.human_mode ? '<button class="btn btn-ghost btn-sm" id="conv-ai">Rendre la main à l’IA</button>' : ''}</div></div>
     ${c.outcome ? `<div class="note-box" style="margin:12px 0"><b>Résultat :</b> ${esc(c.outcome)}${c.booking_id ? ' · <a href="#agenda">voir l’agenda</a>' : ''}</div>` : ''}
     <div class="chat-log">${messages.map((m) => `<div class="bubble from-${m.from}"><div class="small muted">${FROM_LABEL[m.from] || m.from}${m.author ? ` · ${esc(m.author)}` : ''} · ${esc((m.at || '').slice(11, 16))}</div>${esc(m.text)}</div>`).join('')}</div>
-    ${c.contact_form ? `<p class="small" style="margin-top:12px">Message reçu via le formulaire de contact de votre site. ${/@/.test(c.customer_phone) ? `<a class="btn btn-brand btn-sm" href="mailto:${esc(c.customer_phone)}?subject=${encodeURIComponent(`Votre message à ${ctx.salon.name}`)}">Répondre par e-mail</a>` : `<a class="btn btn-brand btn-sm" href="tel:${esc(c.customer_phone)}">Appeler</a>`}</p>`
+    ${c.contact_form ? `<p class="small" style="margin-top:12px">${c.via === 'sms' ? 'Message reçu par SMS.' : 'Message reçu via le formulaire de contact de votre site.'} ${/@/.test(c.customer_phone) ? `<a class="btn btn-brand btn-sm" href="mailto:${esc(c.customer_phone)}?subject=${encodeURIComponent(`Votre message à ${ctx.salon.name}`)}">Répondre par e-mail</a>` : `<a class="btn btn-brand btn-sm" href="tel:${esc(c.customer_phone)}">Appeler</a>`}</p>`
       : c.channel === 'chat' ? `<form id="conv-form" class="row" style="flex-wrap:nowrap;margin-top:12px"><input id="conv-reply" placeholder="Votre réponse au client…" autocomplete="off"><button class="btn btn-brand">Envoyer</button></form>` : '<p class="small muted" style="margin-top:12px">Pour un appel, rappelez le client au numéro ci-dessus.</p>'}`;
   const log = $('.chat-log', pane);
   log.scrollTop = log.scrollHeight;

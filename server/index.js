@@ -92,6 +92,7 @@ function createApp() {
   app.use('/api/pro', require('./routes/pro'));
   app.use('/api/admin', require('./routes/admin'));
   app.use('/api/voice', require('./voice').router());
+  app.use('/api/sms', require('./sms').router());
   // Gmail / Outlook connection: the provider sends the owner back here (top-level navigation, session cookie present).
   app.get('/api/mail/callback/:provider', async (req, res) => {
     try {

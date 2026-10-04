@@ -17,7 +17,7 @@ const chf = (c) => `${(c / 100).toFixed(c % 100 ? 2 : 0)} ${CURRENCY}`;
 /** Structured briefing for a salon (or one collaborator) on a given day. */
 function brief(salon, date = T.now().date, staffId = null) {
   const bookings = all(
-    `SELECT b.id, b.start_at, b.end_at, b.status, b.price_cents, b.notes, b.source, b.style_json, b.payment_status, b.deposit_cents,
+    `SELECT b.id, b.start_at, b.end_at, b.status, b.price_cents, b.notes, b.source, b.style_json, b.payment_status, b.deposit_cents, b.client_confirmed,
             sv.name AS service, st.name AS staff, st.id AS staff_id, c.id AS client_id, c.name AS client, c.phone, c.birthday, c.notes AS client_notes,
             (SELECT COUNT(*) FROM bookings p WHERE p.client_id = c.id AND p.status = 'completed' AND p.start_at < b.start_at) AS past_visits,
             (SELECT COUNT(*) FROM bookings p WHERE p.client_id = c.id AND p.status = 'no_show') AS no_shows
@@ -32,6 +32,7 @@ function brief(salon, date = T.now().date, staffId = null) {
     if (!b.past_visits) flags.push('nouveau client');
     if (b.birthday && b.birthday === date.slice(5)) flags.push('anniversaire aujourd’hui 🎂');
     if (b.no_shows) flags.push(`${b.no_shows} absence(s) passée(s)`);
+    if (b.client_confirmed) flags.push('confirmé par SMS ✓');
     if (b.source === 'phone') flags.push('réservé par l’assistant IA');
     if (b.payment_status === 'paid' && b.deposit_cents) flags.push(`acompte payé ${chf(b.deposit_cents)}`);
     return {
