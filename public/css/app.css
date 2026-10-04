@@ -334,3 +334,5 @@ code.block { display: block; background: var(--ink); color: #e9e4f2; padding: 14
 .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
 body.in-modal .drawer { width: 100%; box-shadow: none; }
 body.in-modal .drawer-backdrop { background: transparent; }
+.switch-band { display: grid; grid-template-columns: 1.4fr 1fr; gap: 32px; align-items: center; }
+@media (max-width: 760px) { .switch-band { grid-template-columns: 1fr; } }

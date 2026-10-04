@@ -32,7 +32,7 @@
       $('#page').innerHTML = `
         <div class="row between"><h1 style="font-size:2rem;margin:0">Bonjour ${esc(user.name.split(' ')[0])}</h1><button class="btn btn-ghost btn-sm" id="logout">Se déconnecter</button></div>
         <div class="kpis" style="margin-top:20px">
-          <div class="kpi"><div class="label">Points fidélité</div><div class="value">${user.loyalty_points}</div><div class="sub">1 point par euro dépensé</div></div>
+          <div class="kpi"><div class="label">Points fidélité</div><div class="value">${user.loyalty_points}</div><div class="sub">1 point par franc dépensé</div></div>
           <div class="kpi"><div class="label">Rendez-vous à venir</div><div class="value">${upcoming.length}</div></div>
           <div class="kpi"><div class="label">Visites</div><div class="value">${list.filter((b) => b.status === 'completed').length}</div></div>
         </div>

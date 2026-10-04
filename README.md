@@ -55,6 +55,7 @@ Au premier lancement, une base de démonstration est créée : 8 salons suisses 
 | --- | --- |
 | Espace pro — Maison Céleste (Premium, modèle Élégance) | `demo@lumea.app` / `demo1234` |
 | Espace pro — Le Barbier du Quai (Essentiel + modèle Urbain acheté) | `pro1@lumea.app` / `demo1234` |
+| Employé de Maison Céleste (voit seulement son agenda) | `hugo@lumea.app` / `demo1234` |
 | Autres salons de démo | `pro2@lumea.app` … `pro7@lumea.app` / `demo1234` |
 | Administration plateforme | `admin@lumea.app` / `admin-lumea-2026` (à changer via `ADMIN_PASSWORD`) |
 
@@ -63,7 +64,7 @@ Autres commandes :
 ```bash
 npm run dev          # rechargement automatique
 npm run seed         # réinitialise les données de démonstration
-npm test             # tests d'intégration de l'API (11 scénarios)
+npm test             # tests d'intégration (17 scénarios, dont paiements Stripe simulés)
 ```
 
 ## Pages
@@ -118,7 +119,10 @@ Copiez `.env.example` et renseignez les variables (via votre hébergeur ou `node
 | `CURRENCY` | Devise affichée (défaut `CHF`) |
 | `SESSION_SECRET` | Secret de session (sinon généré dans `data/secret`) |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Compte administrateur créé au premier démarrage |
-| `NOTIFY_WEBHOOK_URL` | Webhook qui reçoit chaque notification |
+| `STRIPE_SECRET_KEY` | Active les paiements réels (sinon mode démonstration) |
+| `STRIPE_WEBHOOK_SECRET` / `STRIPE_CONNECT_WEBHOOK_SECRET` | Secrets de signature des deux webhooks Stripe |
+| `BREVO_API_KEY`, `MAIL_FROM`, `MAIL_FROM_NAME`, `SMS_SENDER` | Envoi réel des e-mails et SMS |
+| `NOTIFY_WEBHOOK_URL` | Webhook qui reçoit aussi chaque notification (Make, Zapier, n8n) |
 | `DB_PATH` | Fichier SQLite (défaut `data/lumea.db`) |
 | `SEED_DEMO` | `0` pour démarrer sur une base vide |
 
@@ -134,15 +138,54 @@ Fonctionne sur tout hébergeur Node avec disque persistant (Render, Railway, Fly
 
 **Domaines des salons (Premium)** : le salon crée un CNAME `www` vers votre serveur et saisit son domaine dans « Mon site ». Il faut aussi un certificat HTTPS pour ce domaine : utilisez un reverse-proxy à certificats automatiques (Caddy « on-demand TLS », Cloudflare for SaaS, ou Render / Fly custom domains).
 
-## Avant une commercialisation — ce qu'il reste à brancher
+## Mise en production — étapes à suivre
 
-Ce dépôt est un produit fonctionnel de bout en bout ; trois intégrations dépendent de vos comptes fournisseurs :
+Tout le code est prêt ; il reste à créer vos comptes chez les fournisseurs et à renseigner les clés.
 
-1. **Paiements** : l'acompte, les abonnements et les achats / locations de modèles sont enregistrés mais pas encaissés. Brancher Stripe (Checkout + Billing, compatible CHF et TWINT) dans `createBooking` (`server/bookings.js`), `POST /api/pro/plan` et `POST /api/pro/site/licenses` (`server/routes/pro.js`).
-2. **Envoi réel des e-mails / SMS** : connecter `NOTIFY_WEBHOOK_URL` à Brevo, Postmark ou Twilio (directement ou via Make / n8n).
-3. **Juridique** : compléter `public/mentions.html` (éditeur, hébergeur, DPO) et faire valider CGU / CGV.
+### 1. Stripe (paiements) — environ 1 h
 
-Pour une montée en charge importante (plusieurs milliers de salons), migrer SQLite vers PostgreSQL : les requêtes SQL sont standard et centralisées dans `server/`.
+1. Créez un compte sur stripe.com avec votre entreprise suisse (devise CHF), activez **TWINT** dans *Paramètres › Moyens de paiement*.
+2. Activez **Connect** (*Connect › Démarrer*), type de compte **Express**. C'est ce qui permet aux salons d'encaisser les acomptes **directement sur leur compte** : Lumea ne prend **aucune commission**, le salon paie uniquement les frais Stripe (≈ 2,9 % + 0.30 CHF par carte, ≈ 1,3 % TWINT).
+3. Activez le **portail client** (*Paramètres › Billing › Portail client*) : vos salons y gèrent carte, factures et résiliation.
+4. Créez deux webhooks vers `https://VOTRE-DOMAINE/api/stripe/webhook` :
+   - « Votre compte » : `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `customer.subscription.deleted` → secret dans `STRIPE_WEBHOOK_SECRET` ;
+   - « Comptes connectés » : `checkout.session.completed`, `account.updated` → secret dans `STRIPE_CONNECT_WEBHOOK_SECRET`.
+5. Renseignez `STRIPE_SECRET_KEY` (commencez par la clé **test** `sk_test_…` pour tout essayer avec la carte 4242 4242 4242 4242).
+
+Ce qui se passe ensuite automatiquement :
+
+| Action | Résultat |
+| --- | --- |
+| Le salon choisit Essentiel / Premium | Paiement Stripe Checkout, abonnement mensuel, formule activée au paiement |
+| Le salon achète / loue un modèle | 300 CHF une fois ou 20 CHF/mois ; une location résiliée reste active jusqu'à la fin du mois payé |
+| Abonnement impayé ou résilié | Réservation en ligne en pause, données conservées, bandeau « Réactiver » dans l'espace pro |
+| Le salon connecte Stripe (Paramètres › Paiements en ligne) | Les acomptes deviennent réels |
+| Un client réserve avec acompte | Créneau bloqué 30 min, paiement (carte, TWINT, Apple / Google Pay), confirmation envoyée après paiement ; sinon le créneau est libéré |
+| Le client annule dans les délais / le salon annule | Acompte remboursé automatiquement |
+
+Sans `STRIPE_SECRET_KEY`, la plateforme reste en **mode démonstration** : tout fonctionne, rien n'est encaissé.
+
+### 2. Brevo (e-mails et SMS) — environ 30 min
+
+1. Créez un compte sur brevo.com, validez votre domaine d'envoi (enregistrements DNS SPF / DKIM fournis par Brevo).
+2. Renseignez `BREVO_API_KEY`, `MAIL_FROM` (ex. `rendez-vous@votre-domaine.ch`), `MAIL_FROM_NAME`, et pour les SMS `SMS_SENDER` (11 caractères max) après avoir acheté des crédits SMS.
+3. Les e-mails partent au nom du salon (réponse directe au salon) ; les numéros suisses (`079 …`) sont convertis automatiquement au format international.
+
+`NOTIFY_WEBHOOK_URL` reste disponible pour brancher Make, Zapier ou n8n en plus.
+
+### 3. Juridique
+
+Compléter `public/mentions.html` (éditeur, hébergeur, contact protection des données) et faire valider CGU / CGV par un juriste. Ajouter Stripe et Brevo à la liste des sous-traitants.
+
+### 4. Montée en charge
+
+SQLite tient confortablement plusieurs centaines de salons. Au-delà de quelques milliers, migrer vers PostgreSQL : les requêtes SQL sont standard et centralisées dans `server/`.
+
+## Changer de logiciel (argument de vente)
+
+- **Import des clients** : *Clients › Importer* accepte les exports CSV de Salonkee, Planity, Excel ou Google Contacts (colonnes détectées automatiquement : nom / prénom, e-mail, téléphone / natel, notes ; doublons ignorés).
+- **Comptes employés** : *Équipe › Donner un accès* envoie une invitation ; l'employé voit uniquement son agenda et les fiches clients.
+- **Page commerciale** : calculateur « Combien payez-vous aujourd'hui ? » (158 CHF par défaut) → économie avec Essentiel, ou même prix avec le site en plus en Premium.
 
 ## Structure
 
@@ -154,6 +197,10 @@ server/
   availability.js   moteur de créneaux
   bookings.js       création / annulation / déplacement / statuts
   notifications.js  modèles de messages, webhook, automatisations
+  payments.js       appels Stripe (Checkout, Connect, remboursements, webhooks signés)
+  billing.js        effets des paiements : formules, licences, acomptes, fin d'essai
+  mailer.js         envoi e-mail / SMS (Brevo) + webhook
+  csv.js            lecture des fichiers clients importés
   templates.js      les 10 modèles de site + moteur de rendu
   sites.js          règles d'accès (formule, licences), domaines, rendu des sites
   salons.js plans.js ics.js time.js seed.js

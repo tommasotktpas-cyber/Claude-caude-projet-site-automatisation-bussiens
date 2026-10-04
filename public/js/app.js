@@ -494,7 +494,7 @@ function serviceForm(s = null) {
       <div class="field"><label>Nom</label><input name="name" required value="${esc(s?.name || '')}" placeholder="Ex. : Coupe & brushing"></div>
       <div class="grid-3">
         <div class="field"><label>Durée (min)</label><input name="duration_min" type="number" min="5" step="5" value="${s?.duration_min || 30}"></div>
-        <div class="field"><label>Prix (€)</label><input name="price" type="number" min="0" step="0.5" value="${s ? s.price_cents / 100 : ''}"></div>
+        <div class="field"><label>Prix (${CURRENCY})</label><input name="price" type="number" min="0" step="0.5" value="${s ? s.price_cents / 100 : ''}"></div>
         <div class="field"><label>Catégorie</label><input name="category" list="cats" value="${esc(s?.category || 'Prestations')}"><datalist id="cats">${cats.map((c) => `<option>${esc(c)}</option>`).join('')}</datalist></div>
       </div>
       <div class="field"><label>Description <span class="muted">(facultatif)</span></label><input name="description" value="${esc(s?.description || '')}"></div>
@@ -659,7 +659,7 @@ async function renderAutomations() {
     ['Demande d’avis', 'Envoyée 2 h après le rendez-vous. Seuls les clients venus peuvent noter.'],
     ['Liste d’attente', 'Dès qu’un créneau se libère, les clients inscrits pour ce jour sont prévenus.'],
     ['Alerte nouvelle réservation', 'Vous êtes notifié à chaque réservation en ligne.'],
-    ['Fidélité', `1 point par euro crédité au client à l’encaissement${ctx.salon.loyalty_enabled ? '' : ' (désactivé dans Paramètres)'}.`],
+    ['Fidélité', `1 point par franc crédité au client à l’encaissement${ctx.salon.loyalty_enabled ? '' : ' (désactivé dans Paramètres)'}.`],
   ];
   view.innerHTML = `${head('Automatisations', '<button class="btn btn-ghost" id="run-now">Exécuter maintenant</button>')}
     <div class="features">${flows.map(([t, d]) => `<div class="card"><div class="row between"><h3 style="margin:0">${t}</h3><span class="badge badge-ok"><span class="dot"></span>Actif</span></div><p class="small muted" style="margin:8px 0 0">${d}</p></div>`).join('')}</div>
@@ -710,7 +710,7 @@ async function renderSettings() {
           <div class="field"><label>Délai min. (min)</label><input name="min_notice_min" type="number" min="0" value="${s.min_notice_min}"></div>
           <div class="field"><label>Réservable à (jours)</label><input name="max_days_ahead" type="number" min="1" max="365" value="${s.max_days_ahead}"></div>
         </div>
-        <label class="check"><input type="checkbox" name="loyalty_enabled" ${s.loyalty_enabled ? 'checked' : ''}> Programme de fidélité (1 pt / €)</label>
+        <label class="check"><input type="checkbox" name="loyalty_enabled" ${s.loyalty_enabled ? 'checked' : ''}> Programme de fidélité (1 point par franc)</label>
         <label class="check"><input type="checkbox" name="published" ${s.published ? 'checked' : ''}> Page visible sur la marketplace Lumea</label>
         <button class="btn btn-brand" style="margin-top:12px">Enregistrer</button>
       </form>

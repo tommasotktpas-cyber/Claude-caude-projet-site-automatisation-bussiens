@@ -136,7 +136,7 @@ function rescheduleBooking(booking, { date, time, staffId = null, byClient = fal
   return one('SELECT * FROM bookings WHERE id = ?', booking.id);
 }
 
-/** Status change by the salon. Completing a visit credits loyalty points (1 pt / € spent). */
+/** Status change by the salon. Completing a visit credits loyalty points (1 point per franc spent). */
 function setStatus(booking, status) {
   if (!['confirmed', 'completed', 'no_show', 'cancelled'].includes(status)) throw new HttpError(400, 'Statut invalide.');
   if (status === 'cancelled') return cancelBooking(booking);
