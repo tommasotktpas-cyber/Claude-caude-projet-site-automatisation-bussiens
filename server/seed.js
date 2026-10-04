@@ -188,6 +188,21 @@ function seed() {
           ['client', 'Après dix-sept heures. Sophie Keller.'],
           ['assistant', 'C’est noté, Sophie : l’équipe vous rappelle après dix-sept heures. Belle journée !'],
         ]);
+        // Bookkeeping: legal details, monthly expenses and a couple of invoices.
+        run("UPDATE salons SET legal_name = 'Maison Céleste Sàrl', vat_registered = 1, vat_number = 'CHE-482.115.903 TVA', iban = 'CH93 0076 2011 6238 5295 7' WHERE id = ?", salon.id);
+        for (let k = 0; k < 2; k++) { // the months that have till history
+          const month = T.addDays(`${today.slice(0, 7)}-15`, -30 * k).slice(0, 7);
+          const exp = (day, category, supplier, chf, vat = true) => `${month}-${day}` <= today && run(
+            'INSERT INTO expenses (salon_id, day, category, supplier, amount_cents, vat_cents, method) VALUES (?,?,?,?,?,?,?)',
+            salon.id, `${month}-${day}`, category, supplier, Math.round(chf * 100), vat ? Math.round((chf * 100 * 810) / 10810) : 0, 'virement',
+          );
+          exp('01', 'loyer', 'Régie du Rhône', 3200, false);
+          exp('05', 'produits', 'L’Oréal Professionnel', 900 + Math.round(rand() * 700));
+          exp('10', 'energie', 'SIG', 180 + Math.round(rand() * 60));
+          exp('12', 'logiciels', 'Lumea', 158);
+          if (k % 3 === 0) exp('20', 'assurances', 'La Mobilière', 420, false);
+          if (k % 2 === 0) exp('18', 'marketing', 'Meta Ads', 150 + Math.round(rand() * 100));
+        }
         // A demo mailbox, already sorted (status 'demo': never synced).
         const acc = Number(run("INSERT INTO mail_accounts (salon_id, provider, email, refresh_token, status) VALUES (?, 'gmail', 'contact@maison-celeste.ch', '-', 'demo')", salon.id).lastInsertRowid);
         [

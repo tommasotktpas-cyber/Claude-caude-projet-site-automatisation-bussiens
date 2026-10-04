@@ -70,6 +70,13 @@ function createApp() {
     if (!tpl || !salon) return res.status(404).send('Not found');
     res.type('html').send(sites.renderSalonSite(salon, { templateId: tpl.id, content: {}, customCss: '', preview: true }));
   });
+  // Invoice shared with the client (unguessable token link).
+  app.get('/facture/:token', (req, res) => {
+    const inv = one('SELECT * FROM invoices WHERE token = ?', String(req.params.token));
+    if (!inv) return res.status(404).type('html').send('<!doctype html><meta charset="utf-8"><title>Facture introuvable</title><p style="font-family:system-ui;padding:40px">Facture introuvable.</p>');
+    res.setHeader('X-Robots-Tag', 'noindex');
+    res.type('html').send(require('./accounting').renderInvoice(inv));
+  });
   app.get('/api/templates', (_req, res) => res.json(sites.templateCatalog(null)));
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, now: T.now().iso }));

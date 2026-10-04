@@ -1299,7 +1299,7 @@ async function renderTill() {
           <div class="grow"><b>${s.created_at.slice(11, 16)}</b> · ${esc(s.client_name || 'Client de passage')} <span class="muted small">· ${esc(s.staff_name || '')}</span>
             <div class="small muted">${s.items.map((i) => `${i.qty > 1 ? `${i.qty}× ` : ''}${esc(i.name)}`).join(', ')}${s.tip_cents ? ` · pourboire ${fmt.eur(s.tip_cents)}` : ''}</div></div>
           <span class="badge">${METHOD_LABEL[s.method]}</span><b>${fmt.eur(s.total_cents)}</b>
-          ${!s.voided && !ctx.isStaff ? `<button class="btn btn-ghost btn-sm" data-void="${s.id}">Annuler</button>` : ''}
+          ${!s.voided && !ctx.isStaff ? `<button class="btn btn-ghost btn-sm" data-invoice="${s.id}" data-client="${esc(s.client_name || '')}">Facture</button><button class="btn btn-ghost btn-sm" data-void="${s.id}">Annuler</button>` : ''}
         </div>`).join('') || '<div class="empty">Aucune vente ce jour-là.</div>'}</div>
       <div class="stack">
         <div class="card"><h3>Articles vendus</h3>${r.items.map((i) => `<div class="list-item small"><div class="grow">${esc(i.name)}</div><span class="muted">${i.qty}×</span><b>${fmt.eur(i.total_cents)}</b></div>`).join('') || '<p class="muted small">—</p>'}</div>
@@ -1308,6 +1308,16 @@ async function renderTill() {
     </div>`;
   body.querySelectorAll('[data-day]').forEach((b) => { b.onclick = () => { tillState.day = dateUtil.addDays(tillState.day, Number(b.dataset.day)); renderTill(); }; });
   $('#till-day').onchange = (e) => { if (e.target.value) { tillState.day = e.target.value; renderTill(); } };
+  body.querySelectorAll('[data-invoice]').forEach((b) => {
+    b.onclick = async () => {
+      const name = b.dataset.client || prompt('Nom du client sur la facture :');
+      if (!name) return;
+      try {
+        const inv = await api(P('/invoices'), { method: 'POST', body: { sale_id: Number(b.dataset.invoice), customer_name: name } });
+        window.open(`/facture/${inv.token}`, '_blank', 'noopener');
+      } catch (err) { toast(err.message, 'error'); }
+    };
+  });
   body.querySelectorAll('[data-void]').forEach((b) => {
     b.onclick = async () => {
       const ok = await modal({ title: 'Annuler cette vente ?', body: '<p>Le stock et le solde des cartes cadeaux utilisées sont rétablis. À utiliser en cas d’erreur de saisie.</p>', actions: [{ id: 'close', label: 'Garder', cls: 'btn-ghost' }, { id: 'ok', label: 'Annuler la vente', cls: 'btn-danger' }] });
@@ -1621,7 +1631,7 @@ async function renderEmails() {
             <div class="small muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.subject)} — ${esc(m.snippet)}</div>
             ${m.action ? `<div class="small" style="margin-top:4px"><b>À faire :</b> ${esc(m.action)}</div>` : ''}
           </div>
-          <div class="row" style="gap:6px;flex-wrap:nowrap">${m.web_link ? `<a class="btn btn-ghost btn-sm" href="${esc(m.web_link)}" target="_blank" rel="noopener">Ouvrir</a>` : ''}
+          <div class="row" style="gap:6px;flex-wrap:nowrap">${m.category === 'facture' && !m.done ? `<button class="btn btn-ghost btn-sm" data-expense="${m.id}">→ Dépense</button>` : ''}${m.web_link ? `<a class="btn btn-ghost btn-sm" href="${esc(m.web_link)}" target="_blank" rel="noopener">Ouvrir</a>` : ''}
             <button class="btn btn-ghost btn-sm" data-done="${m.id}" data-val="${m.done ? 0 : 1}">${m.done ? 'Rouvrir' : 'Traité'}</button></div>
         </div>`).join('') || '<div class="empty">Rien en attente. 🎉</div>'}</div>` : ''}`;
   view.querySelectorAll('[data-connect]').forEach((b) => {
@@ -1634,6 +1644,15 @@ async function renderEmails() {
       title: 'Déconnecter cette boîte mail ?', body: '<p>Les e-mails importés seront supprimés de Lumea (rien n’est supprimé dans votre messagerie).</p>',
       actions: [{ id: 'close', label: 'Annuler', cls: 'btn-ghost' }, { id: 'ok', label: 'Déconnecter', cls: 'btn-danger', handler: async () => { await api(P(`/mail/accounts/${b.dataset.unlink}`), { method: 'DELETE' }); renderEmails(); } }],
     });
+  });
+  view.querySelectorAll('[data-expense]').forEach((b) => {
+    b.onclick = async () => {
+      const m = d.messages.find((x) => x.id === Number(b.dataset.expense));
+      const acc = await api(P('/accounting'));
+      const amount = (/(\d[\d' ]*[.,]\d{2})\s*(?:CHF|Fr)/i.exec(`${m.summary} ${m.snippet}`) || [])[1];
+      await expenseForm(acc, { supplier: m.from_name || m.from_email, description: m.subject, amount: amount ? amount.replace(/['\s]/g, '').replace(',', '.') : '', mail_message_id: m.id });
+      renderEmails();
+    };
   });
   if ($('#mail-done')) $('#mail-done').onchange = (e) => { mailState.done = e.target.checked; renderEmails(); };
   if ($('#mail-sync')) {
@@ -1653,11 +1672,171 @@ async function renderEmails() {
 }
 
 // =====================================================================
+// Accounting: overview, invoices, expenses, VAT
+// =====================================================================
+const comptaState = { tab: 'apercu', year: null };
+const MONTHS_FR = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+const INV_STATUS = { issued: ['Ouverte', 'badge-warn'], paid: ['Payée', 'badge-ok'], cancelled: ['Annulée', ''] };
+const EXP_METHOD = { virement: 'Virement', carte: 'Carte', especes: 'Espèces', twint: 'TWINT', prelevement: 'Prélèvement' };
+
+const chfRound = (c) => fmt.eur(Math.round(c / 100) * 100);
+
+async function renderCompta() {
+  comptaState.year ||= ctx.today.slice(0, 4);
+  const d = await api(P(`/accounting?year=${comptaState.year}`));
+  const t = d.report.totals;
+  const tabs = [['apercu', 'Vue d’ensemble'], ['factures', 'Factures'], ['depenses', 'Dépenses'], ['reglages', 'Réglages']];
+  const years = [0, 1, 2].map((i) => String(Number(ctx.today.slice(0, 4)) - i));
+  view.innerHTML = `${head('Comptabilité', `<select id="cp-year" style="width:auto">${years.map((y) => `<option ${y === comptaState.year ? 'selected' : ''}>${y}</option>`).join('')}</select>
+      <a class="btn btn-ghost" href="${P(`/export/journal.csv?from=${comptaState.year}-01-01&to=${comptaState.year}-12-31`)}">Export fiduciaire (CSV)</a>`)}
+    <div class="kpis">
+      <div class="kpi"><div class="label">Chiffre d’affaires</div><div class="value">${chfRound(t.revenue_cents)}</div><div class="sub">${comptaState.year}</div></div>
+      <div class="kpi"><div class="label">Dépenses</div><div class="value">${chfRound(t.expenses_cents + t.commissions_cents)}</div><div class="sub">dont commissions ${chfRound(t.commissions_cents)}</div></div>
+      <div class="kpi"><div class="label">Résultat</div><div class="value" style="color:${t.result_cents >= 0 ? 'var(--ok)' : 'var(--danger)'}">${chfRound(t.result_cents)}</div><div class="sub">avant impôts</div></div>
+      <div class="kpi"><div class="label">${d.report.vat_registered ? 'TVA à payer' : 'TVA'}</div><div class="value">${d.report.vat_registered ? chfRound(t.vat_due_cents) : '—'}</div><div class="sub">${d.report.vat_registered ? `${d.report.vat_rate} %, méthode effective` : 'non assujetti'}</div></div>
+      <div class="kpi"><div class="label">Factures ouvertes</div><div class="value">${chfRound(d.report.invoices_open.cents)}</div><div class="sub">${d.report.invoices_open.n} facture(s)${d.report.invoices_open.overdue ? ` · <b style="color:var(--danger)">${d.report.invoices_open.overdue} en retard</b>` : ''}</div></div>
+    </div>
+    <div class="row" style="gap:6px;margin-bottom:14px">${tabs.map(([k, l]) => `<button class="btn btn-sm ${comptaState.tab === k ? 'btn-brand' : 'btn-ghost'}" data-tab="${k}">${l}</button>`).join('')}</div>
+    <div id="cp-body"></div>`;
+  $('#cp-year').onchange = (e) => { comptaState.year = e.target.value; renderCompta(); };
+  view.querySelectorAll('[data-tab]').forEach((b) => { b.onclick = () => { comptaState.tab = b.dataset.tab; renderCompta(); }; });
+  const body = $('#cp-body');
+  if (comptaState.tab === 'apercu') comptaOverview(body, d);
+  else if (comptaState.tab === 'factures') comptaInvoices(body);
+  else if (comptaState.tab === 'depenses') comptaExpenses(body, d);
+  else comptaSettings(body, d);
+}
+
+function comptaOverview(body, d) {
+  const rows = d.report.months;
+  const max = Math.max(1, ...rows.map((m) => Math.max(m.revenue_cents, m.expenses_cents + m.commissions_cents)));
+  body.innerHTML = `<div class="card"><h3>Mois par mois</h3>
+      <div class="row" style="align-items:flex-end;gap:10px;height:160px;margin:10px 0 18px">${rows.map((m) => `
+        <div class="grow center" title="${MONTHS_FR[Number(m.month.slice(5)) - 1]} : CA ${fmt.eur(m.revenue_cents)}, résultat ${fmt.eur(m.result_cents)}">
+          <div class="row" style="align-items:flex-end;justify-content:center;gap:3px;height:130px">
+            <span style="width:12px;border-radius:4px 4px 0 0;background:var(--brand);height:${(m.revenue_cents / max) * 100}%"></span>
+            <span style="width:12px;border-radius:4px 4px 0 0;background:var(--accent);opacity:.7;height:${((m.expenses_cents + m.commissions_cents) / max) * 100}%"></span></div>
+          <div class="small muted">${MONTHS_FR[Number(m.month.slice(5)) - 1]}</div></div>`).join('')}</div>
+      <div class="small muted" style="margin-bottom:10px"><span style="color:var(--brand)">■</span> Chiffre d’affaires · <span style="color:var(--accent)">■</span> Dépenses et commissions</div>
+      <div class="table-wrap" style="border:0"><table><thead><tr><th>Mois</th><th>Encaissé caisse</th><th>Part indépendants</th><th>Factures</th><th>CA salon</th><th>Commissions</th><th>Dépenses</th><th>Résultat</th>${d.report.vat_registered ? '<th>TVA due</th>' : ''}</tr></thead><tbody>
+      ${rows.slice().reverse().map((m) => `<tr><td>${MONTHS_FR[Number(m.month.slice(5)) - 1]} ${m.month.slice(0, 4)}</td><td>${fmt.eur(m.cash_cents)}</td><td>${m.independents_cents > 0 ? `−${fmt.eur(m.independents_cents)}` : m.independents_cents < 0 ? `+${fmt.eur(-m.independents_cents)}` : '—'}</td><td>${fmt.eur(m.invoiced_cents)}</td>
+        <td><b>${fmt.eur(m.revenue_cents)}</b></td><td>${fmt.eur(m.commissions_cents)}</td><td>${fmt.eur(m.expenses_cents)}</td><td><b style="color:${m.result_cents >= 0 ? 'var(--ok)' : 'var(--danger)'}">${fmt.eur(m.result_cents)}</b></td>
+        ${d.report.vat_registered ? `<td title="Collectée ${fmt.eur(m.vat.collected_cents)} − déductible ${fmt.eur(m.vat.deductible_cents)}">${fmt.eur(m.vat.due_cents)}</td>` : ''}</tr>`).join('')}
+      </tbody></table></div>
+      <p class="small muted" style="margin-bottom:0">Encaissé caisse = ventes hors pourboires et hors paiements par carte cadeau (déjà comptés à la vente de la carte). Part indépendants = leurs ventes encaissées par le salon, moins la location de fauteuil. Chiffres de gestion, à valider par votre fiduciaire.</p></div>`;
+}
+
+async function comptaInvoices(body) {
+  const list = await api(P('/invoices'));
+  body.innerHTML = `<div class="card"><div class="row between"><h3 style="margin:0">Factures</h3><button class="btn btn-brand btn-sm" id="inv-new">+ Nouvelle facture</button></div>
+    <div class="table-wrap" style="border:0;margin-top:10px"><table><thead><tr><th>N°</th><th>Client</th><th>Date</th><th>Échéance</th><th>Montant</th><th>Statut</th><th></th></tr></thead><tbody>
+    ${list.map((i) => `<tr><td><a href="/facture/${esc(i.token)}" target="_blank" rel="noopener">${esc(i.number)}</a></td><td>${esc(i.customer_name)}</td><td class="small">${esc(i.issued_on)}</td>
+      <td class="small" style="${i.status === 'issued' && i.due_on < ctx.today ? 'color:var(--danger);font-weight:600' : ''}">${i.status === 'issued' ? esc(i.due_on) : '—'}</td><td>${fmt.eur(i.total_cents)}</td>
+      <td><span class="badge ${INV_STATUS[i.status][1]}">${INV_STATUS[i.status][0]}</span></td>
+      <td class="row" style="gap:4px;flex-wrap:nowrap;justify-content:flex-end">${i.status === 'issued' ? `<button class="btn btn-ghost btn-sm" data-paid="${i.id}">Payée</button>` : ''}
+        <button class="btn btn-ghost btn-sm" data-send="${i.id}" data-email="${esc(i.customer_email)}">Envoyer</button>
+        ${i.status !== 'cancelled' ? `<button class="btn btn-ghost btn-sm" data-cancel="${i.id}" title="Annuler la facture">✕</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">Aucune facture. Créez-en une, ou depuis la Caisse pour une vente.</td></tr>'}
+    </tbody></table></div><p class="small muted" style="margin-bottom:0">Numérotation continue par année (obligatoire). Une facture émise ne se supprime pas : on l’annule.</p></div>`;
+  const patch = async (id, status) => { await api(P(`/invoices/${id}`), { method: 'PATCH', body: { status } }); renderCompta(); };
+  body.querySelectorAll('[data-paid]').forEach((b) => { b.onclick = () => patch(b.dataset.paid, 'paid'); });
+  body.querySelectorAll('[data-cancel]').forEach((b) => { b.onclick = () => modal({ title: 'Annuler cette facture ?', body: '<p>Elle restera dans la liste avec le statut « Annulée ».</p>', actions: [{ id: 'close', label: 'Retour', cls: 'btn-ghost' }, { id: 'ok', label: 'Annuler la facture', cls: 'btn-danger', handler: () => patch(b.dataset.cancel, 'cancelled') }] }); });
+  body.querySelectorAll('[data-send]').forEach((b) => {
+    b.onclick = () => modal({
+      title: 'Envoyer la facture', body: `<div class="field"><label>E-mail du client</label><input id="inv-mail" type="email" value="${esc(b.dataset.email)}"></div>`,
+      actions: [{ id: 'close', label: 'Annuler', cls: 'btn-ghost' }, { id: 'ok', label: 'Envoyer', cls: 'btn-brand', handler: async (dlg) => { await api(P(`/invoices/${b.dataset.send}/send`), { method: 'POST', body: { email: $('#inv-mail', dlg).value } }); toast('Facture envoyée.'); } }],
+    });
+  });
+  $('#inv-new').onclick = () => invoiceForm();
+}
+
+function invoiceForm() {
+  const line = (l = {}) => `<div class="row inv-line" style="gap:6px;flex-wrap:nowrap;margin-bottom:6px"><input class="grow" name="label" placeholder="Désignation" value="${esc(l.label || '')}"><input name="qty" type="number" min="1" value="${l.qty || 1}" style="width:70px"><input name="unit" placeholder="Prix TTC" value="${l.unit || ''}" style="width:110px" inputmode="decimal"></div>`;
+  modal({
+    title: 'Nouvelle facture',
+    body: `<div class="grid-2"><div class="field"><label>Client</label><input id="inv-name" list="inv-clients" placeholder="Nom ou société"></div><div class="field"><label>E-mail</label><input id="inv-email" type="email"></div></div>
+      <datalist id="inv-clients"></datalist>
+      <div class="field"><label>Adresse</label><textarea id="inv-addr" rows="2"></textarea></div>
+      <label>Lignes</label><div id="inv-lines">${line()}</div><button type="button" class="link small" id="inv-add">+ Ajouter une ligne</button>
+      <div class="grid-2" style="margin-top:10px"><div class="field"><label>Payable sous (jours)</label><input id="inv-due" type="number" min="0" max="90" value="30"></div><div class="field"><label>Note</label><input id="inv-note" placeholder="Merci pour votre confiance"></div></div>`,
+    onOpen: (dlg) => {
+      $('#inv-add', dlg).onclick = () => $('#inv-lines', dlg).insertAdjacentHTML('beforeend', line());
+      api(P('/clients')).then((r) => { const list = Array.isArray(r) ? r : r.clients || []; $('#inv-clients', dlg).innerHTML = list.slice(0, 300).map((c) => `<option value="${esc(c.name)}">`).join(''); dlg._clients = list; }).catch(() => {});
+      $('#inv-name', dlg).onchange = (e) => { const c = (dlg._clients || []).find((x) => x.name === e.target.value); if (c && c.email) $('#inv-email', dlg).value = c.email; };
+    },
+    actions: [{ id: 'close', label: 'Annuler', cls: 'btn-ghost' }, {
+      id: 'ok', label: 'Créer la facture', cls: 'btn-brand',
+      handler: async (dlg) => {
+        const items = $$('.inv-line', dlg).map((r) => ({ label: $('[name=label]', r).value, qty: $('[name=qty]', r).value, unit: $('[name=unit]', r).value })).filter((it) => it.label.trim());
+        const inv = await api(P('/invoices'), { method: 'POST', body: { customer_name: $('#inv-name', dlg).value, customer_email: $('#inv-email', dlg).value, customer_address: $('#inv-addr', dlg).value, items, due_days: $('#inv-due', dlg).value, note: $('#inv-note', dlg).value } });
+        toast(`Facture ${inv.number} créée.`);
+        window.open(`/facture/${inv.token}`, '_blank', 'noopener');
+        renderCompta();
+      },
+    }],
+  });
+}
+
+async function comptaExpenses(body, d) {
+  const list = await api(P(`/expenses?year=${comptaState.year}`));
+  const byCat = {};
+  for (const e of list) byCat[e.category] = (byCat[e.category] || 0) + e.amount_cents;
+  const total = list.reduce((a, e) => a + e.amount_cents, 0);
+  body.innerHTML = `<div class="two-col" style="grid-template-columns:2fr 1fr">
+    <div class="card"><div class="row between"><h3 style="margin:0">Dépenses ${comptaState.year}</h3><button class="btn btn-brand btn-sm" id="exp-new">+ Ajouter une dépense</button></div>
+      <div class="table-wrap" style="border:0;margin-top:10px"><table><thead><tr><th>Date</th><th>Catégorie</th><th>Fournisseur</th><th>Montant TTC</th><th>TVA</th><th></th></tr></thead><tbody>
+      ${list.map((e) => `<tr><td class="small">${esc(e.day)}</td><td>${esc(d.categories[e.category] || e.category)}</td><td>${esc(e.supplier)}<div class="small muted">${esc(e.description)}</div></td><td>${fmt.eur(e.amount_cents)}</td><td class="small">${e.vat_cents ? fmt.eur(e.vat_cents) : '—'}</td>
+        <td><button class="btn btn-ghost btn-sm" data-del="${e.id}" aria-label="Supprimer">✕</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Aucune dépense. Ajoutez loyer, produits, assurances… ou directement depuis vos e-mails de factures.</td></tr>'}
+      </tbody></table></div></div>
+    <div class="card"><h3>Par catégorie</h3>${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<div class="row small" style="gap:8px;margin:6px 0"><span style="width:130px">${esc(d.categories[k] || k)}</span><div class="hbar grow" style="margin:0"><span style="--c:var(--accent);width:${(v / Math.max(1, total)) * 100}%"></span></div><span style="width:90px;text-align:right">${fmt.eur(v)}</span></div>`).join('') || '<p class="small muted">—</p>'}</div></div>`;
+  $('#exp-new').onclick = () => expenseForm(d);
+  body.querySelectorAll('[data-del]').forEach((b) => { b.onclick = async () => { await api(P(`/expenses/${b.dataset.del}`), { method: 'DELETE' }); renderCompta(); }; });
+}
+
+function expenseForm(d, preset = {}) {
+  return modal({
+    title: 'Nouvelle dépense',
+    body: `<div class="grid-2"><div class="field"><label>Date</label><input id="ex-day" type="date" value="${esc(preset.day || ctx.today)}"></div>
+      <div class="field"><label>Catégorie</label><select id="ex-cat">${Object.entries(d.categories).map(([k, l]) => `<option value="${k}" ${k === (preset.category || 'produits') ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+      <div class="field"><label>Fournisseur</label><input id="ex-sup" value="${esc(preset.supplier || '')}"></div>
+      <div class="field"><label>Montant TTC (${CURRENCY})</label><input id="ex-amt" inputmode="decimal" value="${esc(preset.amount || '')}" required></div>
+      <div class="field"><label>TVA récupérable</label><input id="ex-vat" inputmode="decimal" placeholder="${d.settings.vat_registered ? `auto ${d.settings.vat_rate} %` : '0'}"></div>
+      <div class="field"><label>Paiement</label><select id="ex-meth">${d.methods.map((m) => `<option value="${m}">${EXP_METHOD[m]}</option>`).join('')}</select></div></div>
+      <div class="field"><label>Description</label><input id="ex-desc" value="${esc(preset.description || '')}"></div>`,
+    actions: [{ id: 'close', label: 'Annuler', cls: 'btn-ghost' }, {
+      id: 'ok', label: 'Enregistrer', cls: 'btn-brand',
+      handler: async (dlg) => {
+        await api(P('/expenses'), { method: 'POST', body: { day: $('#ex-day', dlg).value, category: $('#ex-cat', dlg).value, supplier: $('#ex-sup', dlg).value, amount: $('#ex-amt', dlg).value, vat: $('#ex-vat', dlg).value, method: $('#ex-meth', dlg).value, description: $('#ex-desc', dlg).value, mail_message_id: preset.mail_message_id } });
+        toast('Dépense enregistrée.');
+        if (location.hash === '#compta') renderCompta();
+      },
+    }],
+  });
+}
+
+function comptaSettings(body, d) {
+  const s = d.settings;
+  body.innerHTML = `<form class="card" id="cp-set" style="max-width:720px"><h3>Informations légales & TVA</h3>
+    <div class="grid-2"><div class="field"><label>Raison sociale</label><input name="legal_name" value="${esc(s.legal_name)}" placeholder="Salon Exemple Sàrl"></div>
+      <div class="field"><label>IBAN (pour les factures)</label><input name="iban" value="${esc(s.iban)}" placeholder="CH93 0076 2011 6238 5295 7"></div></div>
+    <label class="check"><input type="checkbox" name="vat_registered" ${s.vat_registered ? 'checked' : ''}> Assujetti à la TVA (obligatoire dès 100 000 CHF de chiffre d’affaires annuel)</label>
+    <div class="grid-2"><div class="field"><label>N° TVA</label><input name="vat_number" value="${esc(s.vat_number)}" placeholder="CHE-123.456.789 TVA"></div>
+      <div class="field"><label>Taux (%)</label><input name="vat_rate" inputmode="decimal" value="${s.vat_rate}"><div class="hint">Taux normal suisse : 8.1 %</div></div></div>
+    <div class="field"><label>Pied de facture</label><input name="invoice_footer" value="${esc(s.invoice_footer)}" placeholder="Merci de votre confiance. Conditions : paiement à 30 jours."></div>
+    <button class="btn btn-brand">Enregistrer</button></form>`;
+  $('#cp-set').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = formData(e.target);
+    f.vat_registered = !!f.vat_registered;
+    try { await api(P('/accounting/settings'), { method: 'PUT', body: f }); toast('Réglages enregistrés.'); renderCompta(); } catch (err) { toast(err.message, 'error'); }
+  };
+}
+
+// =====================================================================
 // Router
 // =====================================================================
 const ROUTES = {
   dashboard: renderDashboard, agenda: renderAgenda, clients: () => renderClients(), services: renderServices,
-  team: renderTeam, reviews: renderReviews, automations: renderAutomations, settings: renderSettings, billing: renderBilling, site: renderSiteEditor, caisse: renderTill, stock: renderStock, messages: renderMessages, assistant: renderAssistant, emails: renderEmails, gains: renderEarnings, planning: renderMyPlanning,
+  team: renderTeam, reviews: renderReviews, automations: renderAutomations, settings: renderSettings, billing: renderBilling, site: renderSiteEditor, caisse: renderTill, stock: renderStock, messages: renderMessages, assistant: renderAssistant, emails: renderEmails, compta: renderCompta, gains: renderEarnings, planning: renderMyPlanning,
 };
 
 async function route() {

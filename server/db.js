@@ -423,6 +423,54 @@ CREATE INDEX IF NOT EXISTS idx_ai_conv_salon ON ai_conversations (salon_id, upda
 addColumn('ai_conversations', 'human_mode', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('ai_conversations', 'unread', 'INTEGER NOT NULL DEFAULT 0');
 
+// Invoicing & bookkeeping.
+addColumn('salons', 'legal_name', "TEXT NOT NULL DEFAULT ''");
+addColumn('salons', 'vat_number', "TEXT NOT NULL DEFAULT ''");
+addColumn('salons', 'vat_registered', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('salons', 'vat_rate_bp', 'INTEGER NOT NULL DEFAULT 810'); // basis points: 810 = 8.1 %
+addColumn('salons', 'iban', "TEXT NOT NULL DEFAULT ''");
+addColumn('salons', 'invoice_footer', "TEXT NOT NULL DEFAULT ''");
+addColumn('salons', 'invoice_year', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('salons', 'invoice_seq', 'INTEGER NOT NULL DEFAULT 0');
+db.exec(`
+CREATE TABLE IF NOT EXISTS invoices (
+  id INTEGER PRIMARY KEY,
+  salon_id INTEGER NOT NULL REFERENCES salons(id) ON DELETE CASCADE,
+  number TEXT NOT NULL,
+  token TEXT NOT NULL UNIQUE,
+  sale_id INTEGER REFERENCES sales(id) ON DELETE SET NULL,
+  client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+  customer_name TEXT NOT NULL,
+  customer_address TEXT NOT NULL DEFAULT '',
+  customer_email TEXT NOT NULL DEFAULT '',
+  issued_on TEXT NOT NULL,
+  due_on TEXT NOT NULL,
+  items TEXT NOT NULL,
+  total_cents INTEGER NOT NULL,
+  vat_cents INTEGER NOT NULL DEFAULT 0,
+  vat_rate_bp INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'issued' CHECK (status IN ('issued','paid','cancelled')),
+  paid_on TEXT,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (salon_id, number)
+);
+CREATE TABLE IF NOT EXISTS expenses (
+  id INTEGER PRIMARY KEY,
+  salon_id INTEGER NOT NULL REFERENCES salons(id) ON DELETE CASCADE,
+  day TEXT NOT NULL,
+  category TEXT NOT NULL,
+  supplier TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  amount_cents INTEGER NOT NULL,
+  vat_cents INTEGER NOT NULL DEFAULT 0,
+  method TEXT NOT NULL DEFAULT 'virement',
+  mail_message_id INTEGER REFERENCES mail_messages(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_expenses_salon_day ON expenses (salon_id, day);
+`);
+
 // Connected mailboxes (Gmail / Outlook): read-only, tokens encrypted at rest.
 db.exec(`
 CREATE TABLE IF NOT EXISTS mail_accounts (

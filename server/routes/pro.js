@@ -1088,4 +1088,85 @@ router.delete('/mail/accounts/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Invoices, expenses, accounting ----------
+
+router.get('/accounting', (req, res) => {
+  const acc = require('../accounting');
+  const year = /^\d{4}$/.test(req.query.year || '') ? req.query.year : T.now().date.slice(0, 4);
+  const s = req.salon;
+  res.json({
+    year,
+    settings: { legal_name: s.legal_name, vat_number: s.vat_number, vat_registered: s.vat_registered, vat_rate: s.vat_rate_bp / 100, iban: s.iban, invoice_footer: s.invoice_footer },
+    report: acc.report(s, `${year}-01`, year === T.now().date.slice(0, 4) ? T.now().date.slice(0, 7) : `${year}-12`),
+    categories: acc.EXPENSE_CATEGORIES,
+    methods: acc.EXPENSE_METHODS,
+  });
+});
+
+router.put('/accounting/settings', (req, res) => {
+  const b = req.body || {};
+  const s = req.salon;
+  const rate = Number(String(b.vat_rate ?? '').replace(',', '.'));
+  const iban = b.iban === undefined ? s.iban : clean(b.iban, 42).toUpperCase().replace(/[^A-Z0-9 ]/g, '');
+  if (iban && !/^[A-Z]{2}\d{2}[A-Z0-9 ]{10,38}$/.test(iban)) throw new HttpError(400, 'IBAN invalide.');
+  run(
+    'UPDATE salons SET legal_name=?, vat_number=?, vat_registered=?, vat_rate_bp=?, iban=?, invoice_footer=? WHERE id=?',
+    b.legal_name === undefined ? s.legal_name : clean(b.legal_name, 160),
+    b.vat_number === undefined ? s.vat_number : clean(b.vat_number, 40),
+    b.vat_registered === undefined ? s.vat_registered : (b.vat_registered ? 1 : 0),
+    Number.isFinite(rate) && rate >= 0 && rate <= 30 && b.vat_rate !== undefined && b.vat_rate !== '' ? Math.round(rate * 100) : s.vat_rate_bp,
+    iban, b.invoice_footer === undefined ? s.invoice_footer : clean(b.invoice_footer, 500), s.id,
+  );
+  res.json({ ok: true });
+});
+
+router.get('/invoices', (req, res) => {
+  res.json(all('SELECT id, number, token, customer_name, customer_email, issued_on, due_on, total_cents, vat_cents, status, paid_on, sale_id FROM invoices WHERE salon_id = ? ORDER BY id DESC LIMIT 300', req.salon.id));
+});
+
+router.post('/invoices', (req, res) => {
+  const inv = require('../accounting').createInvoice(one('SELECT * FROM salons WHERE id = ?', req.salon.id), req.body);
+  res.status(201).json({ ...inv, url: `${APP_URL}/facture/${inv.token}` });
+});
+
+router.patch('/invoices/:id', (req, res) => {
+  const inv = one('SELECT * FROM invoices WHERE id = ? AND salon_id = ?', Number(req.params.id), req.salon.id);
+  if (!inv) throw new HttpError(404, 'Facture introuvable.');
+  const status = ['issued', 'paid', 'cancelled'].includes(req.body?.status) ? req.body.status : inv.status;
+  run('UPDATE invoices SET status = ?, paid_on = ? WHERE id = ?', status, status === 'paid' ? (inv.paid_on || T.now().date) : null, inv.id);
+  res.json({ ok: true });
+});
+
+router.post('/invoices/:id/send', async (req, res) => {
+  const inv = one('SELECT * FROM invoices WHERE id = ? AND salon_id = ?', Number(req.params.id), req.salon.id);
+  if (!inv) throw new HttpError(404, 'Facture introuvable.');
+  const to = clean(req.body?.email || inv.customer_email, 160);
+  if (!EMAIL_RE.test(to)) throw new HttpError(400, 'Adresse e-mail du client manquante.');
+  const body = `Bonjour ${inv.customer_name},\n\nVoici votre facture ${inv.number} de ${(inv.total_cents / 100).toFixed(2)} ${CURRENCY} :\n${APP_URL}/facture/${inv.token}\n\nMerci de votre confiance,\n${req.salon.name}`;
+  run("INSERT INTO notifications (salon_id, kind, channel, recipient, subject, body) VALUES (?, 'invoice', 'email', ?, ?, ?)", req.salon.id, to, `Facture ${inv.number}`, body);
+  await require('../mailer').send({ channel: 'email', to, subject: `Facture ${inv.number} · ${req.salon.name}`, body, fromName: req.salon.name });
+  if (!inv.customer_email) run('UPDATE invoices SET customer_email = ? WHERE id = ?', to, inv.id);
+  res.json({ ok: true });
+});
+
+router.get('/expenses', (req, res) => {
+  const year = /^\d{4}$/.test(req.query.year || '') ? req.query.year : T.now().date.slice(0, 4);
+  res.json(all("SELECT * FROM expenses WHERE salon_id = ? AND substr(day, 1, 4) = ? ORDER BY day DESC, id DESC", req.salon.id, year));
+});
+router.post('/expenses', (req, res) => res.status(201).json(require('../accounting').saveExpense(req.salon, req.body)));
+router.put('/expenses/:id', (req, res) => res.json(require('../accounting').saveExpense(req.salon, req.body, Number(req.params.id))));
+router.delete('/expenses/:id', (req, res) => {
+  if (!run('DELETE FROM expenses WHERE id = ? AND salon_id = ?', Number(req.params.id), req.salon.id).changes) throw new HttpError(404, 'Dépense introuvable.');
+  res.json({ ok: true });
+});
+
+router.get('/export/journal.csv', (req, res) => {
+  const year = T.now().date.slice(0, 4);
+  const from = T.isDate(req.query.from) ? req.query.from : `${year}-01-01`;
+  const to = T.isDate(req.query.to) ? req.query.to : `${year}-12-31`;
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="journal-${from}-${to}.csv"`);
+  res.send(require('../accounting').journalCsv(req.salon, from, to));
+});
+
 module.exports = router;
