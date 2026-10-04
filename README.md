@@ -40,6 +40,19 @@ Chaque site est rendu côté serveur (rapide, référencement Google avec donné
 
 Dans l'espace pro, **Mon site** permet de : choisir et prévisualiser tous les modèles avec ses propres données, acheter / louer un modèle, éditer textes, photos, galerie, réseaux sociaux, couleur, sections, publier, et en Premium : domaine, CSS, marque blanche, demande de site sur mesure.
 
+## Ce qui fait la différence auprès des salons
+
+| Fonction | Où | Détail |
+| --- | --- | --- |
+| **Studio coupe 3D** | Réservation (coiffure / barbier) | Le client règle sa coupe sur une tête 3D (15 coupes, longueurs en cm, dégradé, barbe, couleur, teint). Le salon choisit les coupes qu'il propose (*Paramètres › Studio coupe 3D*) et active le studio par prestation. La fiche (image + longueurs + précisions) arrive dans l'agenda. Moteur : `public/js/studio3d.js` (three.js servi localement). |
+| **Caisse** | *Caisse* | Encaissement d'un RDV ou vente de passage, prestations (prix ajustable), produits, remise, pourboire, espèces avec rendu, carte, TWINT, carte cadeau, acompte en ligne déduit. Journée, clôture de caisse, export comptable CSV, annulation. |
+| **Stock** | *Stock* | Produits, prix d'achat / marge, alertes de rupture, réassort, mouvements tracés. |
+| **Cartes cadeaux** | `/carte-cadeau.html?s=<slug>` | Achat en ligne (Stripe sur le compte du salon) ou en caisse, code `LUM-XXXX-XXXX`, solde utilisable en plusieurs fois, valable 2 ans. |
+| **Dernière minute** | *Paramètres* | Remise automatique sur les créneaux libres dans les N prochaines heures, visible sur la marketplace et les créneaux. |
+| **C'est l'heure de revenir** | *Prestations* | Rappel X semaines après une visite (valeurs par défaut : coupe 5, barbe 3, ongles 3, couleur 7), seulement si le client n'a rien réservé depuis. |
+| **Anniversaire** | *Paramètres* | Message avec l'offre du salon le jour J (date demandée, facultative, à la réservation). |
+| **Petites attentions** | Partout | « Dispo aujourd'hui à 14h30 » sur la marketplace, « Reprendre ce rendez-vous » en un clic, confettis à la confirmation. |
+
 ## Démarrage rapide
 
 Prérequis : **Node.js 22.13 ou plus** (SQLite est intégré à Node, aucune base externe).
@@ -64,7 +77,7 @@ Autres commandes :
 ```bash
 npm run dev          # rechargement automatique
 npm run seed         # réinitialise les données de démonstration
-npm test             # tests d'intégration (17 scénarios, dont paiements Stripe simulés)
+npm test             # tests d'intégration (20 scénarios, dont paiements Stripe simulés)
 ```
 
 ## Pages
@@ -201,6 +214,8 @@ server/
   billing.js        effets des paiements : formules, licences, acomptes, fin d'essai
   mailer.js         envoi e-mail / SMS (Brevo) + webhook
   csv.js            lecture des fichiers clients importés
+  styles.js         catalogue des coupes du Studio 3D, validation des fiches coupe
+  pos.js            caisse, cartes cadeaux, clôture de caisse
   templates.js      les 10 modèles de site + moteur de rendu
   sites.js          règles d'accès (formule, licences), domaines, rendu des sites
   salons.js plans.js ics.js time.js seed.js
