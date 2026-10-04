@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Carte cadeau — Lumea</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <style>
+    .gc-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: start; padding-block: 48px; }
+    @media (max-width: 860px) { .gc-wrap { grid-template-columns: 1fr; } }
+    .gift { position: relative; aspect-ratio: 1.6 / 1; border-radius: 22px; padding: 26px; color: #fff; overflow: hidden; box-shadow: 0 30px 60px -20px rgba(24, 21, 31, .45);
+      background: radial-gradient(circle at 85% 15%, rgba(255,255,255,.35), transparent 40%), linear-gradient(135deg, var(--c, #6d28d9), color-mix(in srgb, var(--c, #6d28d9) 45%, #18151f)); display: flex; flex-direction: column; justify-content: space-between; }
+    .gift::after { content: ''; position: absolute; right: -60px; bottom: -60px; width: 220px; height: 220px; border-radius: 50%; border: 28px solid rgba(255,255,255,.12); }
+    .gift .salon { font-family: var(--display); font-size: 1.5rem; font-weight: 700; }
+    .gift .amount { font-family: var(--display); font-size: clamp(2.4rem, 7vw, 3.6rem); font-weight: 700; letter-spacing: -.02em; line-height: 1; }
+    .gift .to { opacity: .9; font-size: .95rem; }
+    .gift .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; font-size: 1.05rem; background: rgba(255,255,255,.16); padding: 6px 10px; border-radius: 8px; align-self: flex-start; }
+    .amounts { display: flex; gap: 8px; flex-wrap: wrap; }
+    @media print { .site-header, .site-footer, .no-print { display: none !important; } .gc-wrap { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header id="site-header"></header>
+  <main class="container" id="page"><div class="skeleton" style="height:320px;margin-top:48px"></div></main>
+  <footer id="site-footer"></footer>
+  <script src="/js/config.js"></script>
+  <script src="/js/common.js"></script>
+  <script>
+    'use strict';
+    mountChrome();
+    const params = new URLSearchParams(location.search);
+    const money = (cents) => fmt.eur(cents);
+
+    function cardHtml({ salon, amount, recipient, message, code, balance, expires }) {
+      return `<div class="gift" style="--c:${esc(salon.accent || '#6d28d9')}">
+        <div class="row between"><span class="salon">${esc(salon.name)}</span><span class="small" style="opacity:.85">Carte cadeau</span></div>
+        <div><div class="amount">${money(amount)}</div>${recipient ? `<div class="to">Pour ${esc(recipient)}</div>` : ''}${message ? `<div class="to" style="margin-top:6px;font-style:italic">« ${esc(message)} »</div>` : ''}</div>
+        <div class="row between">${code ? `<span class="code">${esc(code)}</span>` : '<span class="code">LUM-••••-••••</span>'}${expires ? `<span class="small" style="opacity:.85">Valable jusqu’au ${esc(expires)}</span>` : ''}</div>
+      </div>${balance !== undefined && balance !== amount ? `<p class="center muted" style="margin-top:12px">Solde restant : <b>${money(balance)}</b></p>` : ''}`;
+    }
+
+    async function showCard(code) {
+      let g;
+      try { g = await api(`/api/public/gift-cards/${encodeURIComponent(code)}`); } catch (err) {
+        $('#page').innerHTML = `<div class="narrow empty" style="padding:80px 0"><h2>Carte introuvable</h2><p>${esc(err.message)}</p></div>`;
+        return;
+      }
+      document.documentElement.style.setProperty('--brand', g.salon.accent);
+      $('#page').innerHTML = `<div class="gc-wrap">
+        <div>${cardHtml({ salon: g.salon, amount: g.initial_cents, recipient: g.recipient_name, message: g.message, code: g.code, balance: g.balance_cents, expires: g.expires_at })}</div>
+        <div class="stack">
+          ${g.status === 'pending' ? '<span class="badge badge-warn">Paiement en cours de validation…</span>' : '<span class="badge badge-ok">Carte active</span>'}
+          <h1 style="font-size:2rem">Votre carte cadeau ${esc(g.salon.name)}</h1>
+          <p class="muted">Présentez ce code au salon lors de votre rendez-vous : le montant est déduit à la caisse, en une ou plusieurs fois.${g.buyer_name ? ` Offerte par ${esc(g.buyer_name)}.` : ''}</p>
+          <p class="small muted">${esc(g.salon.address)}, ${esc(g.salon.city)}${g.salon.phone ? ` · ${esc(g.salon.phone)}` : ''}</p>
+          <div class="row no-print"><a class="btn btn-brand" href="/salon.html?s=${encodeURIComponent(g.salon.slug)}">Réserver un rendez-vous</a><button class="btn btn-ghost" onclick="window.print()">Imprimer</button>
+            <button class="btn btn-ghost" id="copy-link">Copier le lien</button></div>
+        </div></div>`;
+      $('#copy-link').onclick = async () => { try { await navigator.clipboard.writeText(location.href); toast('Lien copié : envoyez-le à la personne qui reçoit la carte.'); } catch { toast(location.href); } };
+    }
+
+    async function showShop(slug) {
+      let data;
+      try { data = await api(`/api/public/salons/${encodeURIComponent(slug)}`); } catch (err) {
+        $('#page').innerHTML = `<div class="narrow empty" style="padding:80px 0"><h2>Salon introuvable</h2></div>`;
+        return;
+      }
+      const salon = data.salon;
+      document.documentElement.style.setProperty('--brand', salon.accent);
+      document.title = `Carte cadeau ${salon.name}`;
+      const st = { amount: 10000, recipient: '', message: '' };
+      if (!salon.giftcards_enabled || !salon.online_booking) {
+        $('#page').innerHTML = `<div class="narrow empty" style="padding:80px 0"><h2>${esc(salon.name)}</h2><p>Ce salon ne propose pas de cartes cadeaux en ligne pour le moment.</p></div>`;
+        return;
+      }
+      $('#page').innerHTML = `<div class="gc-wrap">
+        <div style="position:sticky;top:90px"><div id="preview"></div><p class="small muted center" style="margin-top:12px">Utilisable sur toutes les prestations et produits du salon pendant 2 ans.</p></div>
+        <form class="card pad-lg" id="gc-form">
+          <h1 style="font-size:1.9rem">Offrir ${esc(salon.name)}</h1>
+          <div class="field"><label>Montant</label><div class="amounts">${[50, 80, 100, 150, 200].map((a) => `<button type="button" class="chip ${a * 100 === st.amount ? 'active' : ''}" data-amount="${a}">${money(a * 100)}</button>`).join('')}
+            <input id="gc-custom" type="number" min="10" max="1000" step="5" placeholder="Autre" style="width:110px;padding:8px 12px"></div></div>
+          <div class="grid-2"><div class="field"><label for="gc-to">Pour</label><input id="gc-to" name="recipient_name" placeholder="Prénom de la personne"></div>
+            <div class="field"><label for="gc-from">De la part de</label><input id="gc-from" name="buyer_name" required autocomplete="name"></div></div>
+          <div class="field"><label for="gc-msg">Petit mot (facultatif)</label><input id="gc-msg" name="message" maxlength="140" placeholder="Joyeux anniversaire !"></div>
+          <div class="field"><label for="gc-mail">Votre e-mail</label><input id="gc-mail" name="buyer_email" type="email" required autocomplete="email"><div class="hint">Vous recevez la carte (code + lien à imprimer ou à transférer).</div></div>
+          <button class="btn btn-brand btn-lg btn-block" id="gc-buy">Acheter la carte</button>
+        </form></div>`;
+      const renderPreview = () => {
+        $('#preview').innerHTML = cardHtml({ salon, amount: st.amount, recipient: st.recipient, message: st.message });
+        $('#gc-buy').textContent = `Acheter la carte de ${money(st.amount)}`;
+      };
+      $('#gc-form').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-amount]');
+        if (!b) return;
+        st.amount = Number(b.dataset.amount) * 100;
+        $('#gc-custom').value = '';
+        $$('[data-amount]').forEach((x) => x.classList.toggle('active', x === b));
+        renderPreview();
+      });
+      $('#gc-form').addEventListener('input', (e) => {
+        if (e.target.id === 'gc-custom' && e.target.value) { st.amount = Math.round(Number(e.target.value) * 100); $$('[data-amount]').forEach((x) => x.classList.remove('active')); }
+        if (e.target.id === 'gc-to') st.recipient = e.target.value;
+        if (e.target.id === 'gc-msg') st.message = e.target.value;
+        renderPreview();
+      });
+      $('#gc-form').onsubmit = async (e) => {
+        e.preventDefault();
+        const btn = $('#gc-buy');
+        btn.disabled = true;
+        try {
+          const r = await api(`/api/public/salons/${encodeURIComponent(slug)}/gift-cards`, { method: 'POST', body: { ...formData(e.target), amount: st.amount / 100 } });
+          if (r.checkout_url) { location.href = r.checkout_url; return; }
+          location.href = `/carte-cadeau.html?c=${encodeURIComponent(r.code)}`;
+        } catch (err) { toast(err.message, 'error'); btn.disabled = false; }
+      };
+      renderPreview();
+    }
+
+    if (params.get('c')) showCard(params.get('c'));
+    else if (params.get('s')) showShop(params.get('s'));
+    else location.href = '/';
+  </script>
+</body>
+</html>

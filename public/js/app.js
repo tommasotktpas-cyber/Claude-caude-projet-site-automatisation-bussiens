@@ -19,7 +19,7 @@ $('#logout').onclick = async (e) => {
   location.href = '/';
 };
 
-const STAFF_ROUTES = ['agenda', 'clients'];
+const STAFF_ROUTES = ['agenda', 'clients', 'caisse'];
 
 async function refreshCtx() {
   const [s, staff, services] = await Promise.all([api(P('/salon')), api(P('/staff')), api(P('/services'))]);
@@ -325,7 +325,7 @@ function bookingDetail(b, after) {
       { id: 'cancel', label: 'Annuler le RDV', cls: 'btn-ghost', handler: patch({ status: 'cancelled' }, 'Rendez-vous annulé, client prévenu.') },
       { id: 'noshow', label: 'Absent', cls: 'btn-danger', handler: patch({ status: 'no_show' }, 'Marqué absent.') },
       { id: 'move', label: 'Déplacer', cls: 'btn-ghost', handler: () => { setTimeout(() => moveBooking(b, after)); } },
-      { id: 'done', label: `Encaisser ${fmt.eur(b.price_cents - b.paid_cents)}`, cls: 'btn-ok', handler: patch({ status: 'completed' }, 'Rendez-vous terminé et encaissé.') },
+      { id: 'done', label: 'Encaisser', cls: 'btn-ok', handler: () => { setTimeout(() => checkoutModal({ booking: b, after })); } },
     );
   } else if (b.status !== 'cancelled') {
     actions.push({ id: 'reopen', label: 'Repasser en confirmé', cls: 'btn-ghost', handler: patch({ status: 'confirmed' }, 'Statut mis à jour.') });
@@ -1049,12 +1049,284 @@ function renderSitePanel() {
   panel.onchange = panel.oninput;
 }
 
+
+// =====================================================================
+// Till (caisse), stock, gift cards
+// =====================================================================
+const METHOD_LABEL = { cash: 'Espèces', card: 'Carte', twint: 'TWINT', gift_card: 'Carte cadeau', other: 'Autre', online: 'Acompte en ligne' };
+const toCents = (v) => Math.round(Number(String(v).replace(',', '.')) * 100) || 0;
+
+/** Checkout screen: from a booking (prefilled) or a walk-in sale. */
+async function checkoutModal({ booking = null, after = () => route() } = {}) {
+  const [products, services] = await Promise.all([api(P('/products')), Promise.resolve(ctx.services)]);
+  const lines = [];
+  if (booking) lines.push({ kind: 'service', ref_id: booking.service_id, name: booking.service_name, qty: 1, unit_cents: booking.price_cents });
+  const st = { discount: 0, tip: 0, method: 'card', gift: null, staff: booking?.staff_id || (ctx.staff[0]?.id ?? '') };
+  const deposit = booking && booking.payment_status === 'paid' ? booking.deposit_cents : 0;
+
+  const totals = () => {
+    const sub = lines.reduce((a, l) => a + l.unit_cents * l.qty, 0);
+    const discount = Math.min(sub, st.discount);
+    const total = sub - discount + st.tip;
+    const giftUse = st.gift ? Math.min(st.gift.balance_cents, total) : 0;
+    return { sub, discount, total, giftUse, due: Math.max(0, total - giftUse - deposit) };
+  };
+
+  const render = (d) => {
+    const t = totals();
+    $('#co-lines', d).innerHTML = lines.map((l, i) => `
+      <div class="list-item small"><div class="grow"><b>${esc(l.name)}</b>${l.kind === 'gift_card' ? ' <span class="badge">Carte cadeau</span>' : ''}</div>
+        ${l.kind === 'product' ? `<input type="number" min="1" max="99" value="${l.qty}" data-qty="${i}" style="width:64px;padding:6px">` : ''}
+        ${l.kind === 'product' ? `<span>${fmt.eur(l.unit_cents)}</span>` : `<input type="number" min="0" step="0.5" value="${l.unit_cents / 100}" data-price="${i}" style="width:96px;padding:6px" aria-label="Prix">`}
+        <b style="width:84px;text-align:right">${fmt.eur(l.unit_cents * l.qty)}</b>
+        <button type="button" class="icon-btn" data-rm="${i}" aria-label="Retirer">×</button></div>`).join('') || '<p class="muted small">Aucun article.</p>';
+    $('#co-sum', d).innerHTML = `
+      <div><span>Sous-total</span><span>${fmt.eur(t.sub)}</span></div>
+      ${t.discount ? `<div><span>Remise</span><span>− ${fmt.eur(t.discount)}</span></div>` : ''}
+      ${st.tip ? `<div><span>Pourboire</span><span>${fmt.eur(st.tip)}</span></div>` : ''}
+      ${t.giftUse ? `<div><span>Carte cadeau ${esc(st.gift.code)}</span><span>− ${fmt.eur(t.giftUse)}</span></div>` : ''}
+      ${deposit ? `<div><span>Acompte déjà payé en ligne</span><span>− ${fmt.eur(deposit)}</span></div>` : ''}
+      <div style="border-top:1px solid var(--line);margin-top:6px;padding-top:8px;font-size:1.15rem"><b>À encaisser</b><b>${fmt.eur(t.due)}</b></div>`;
+    $('#co-change', d).hidden = st.method !== 'cash';
+    const given = toCents($('#co-given', d).value);
+    $('#co-change-out', d).textContent = given >= t.due && given ? `Rendu : ${fmt.eur(given - t.due)}` : '';
+    $('[data-act="pay"]', d.closest('dialog') || d).textContent = `Encaisser ${fmt.eur(t.due)}`;
+  };
+
+  modal({
+    title: booking ? `Encaisser — ${booking.client_name}` : 'Nouvelle vente',
+    body: `
+      <div id="co-lines"></div>
+      <div class="grid-3" style="margin-top:12px">
+        <div class="field"><label>Produit</label><select id="co-add-product"><option value="">+ Ajouter</option>${products.filter((p) => p.active).map((p) => `<option value="${p.id}" ${p.stock < 1 ? 'disabled' : ''}>${esc(p.name)} · ${fmt.eur(p.price_cents)} (${p.stock})</option>`).join('')}</select></div>
+        <div class="field"><label>Prestation</label><select id="co-add-service"><option value="">+ Ajouter</option>${services.filter((x) => x.active).map((x) => `<option value="${x.id}">${esc(x.name)} · ${fmt.eur(x.price_cents)}</option>`).join('')}</select></div>
+        <div class="field"><label>Carte cadeau à vendre</label><div class="row" style="flex-wrap:nowrap;gap:6px"><input id="co-gift-amount" type="number" min="10" step="10" placeholder="Montant"><button type="button" class="btn btn-ghost btn-sm" id="co-add-gift">+</button></div></div>
+      </div>
+      <div class="grid-2">
+        <div class="field"><label>Remise (${CURRENCY})</label><input id="co-discount" type="number" min="0" step="0.5" value="0"></div>
+        <div class="field"><label>Pourboire</label><div class="row" style="gap:6px">${[0, 5, 10, 15].map((p) => `<button type="button" class="chip ${p === 0 ? 'active' : ''}" data-tip="${p}">${p ? `${p} %` : 'Aucun'}</button>`).join('')}<input id="co-tip" type="number" min="0" step="0.5" placeholder="${CURRENCY}" style="width:90px;padding:6px"></div></div>
+      </div>
+      <div class="field"><label>Carte cadeau du client</label><div class="row" style="flex-wrap:nowrap;gap:6px"><input id="co-gift-code" placeholder="LUM-XXXX-XXXX" style="text-transform:uppercase"><button type="button" class="btn btn-ghost btn-sm" id="co-gift-check">Appliquer</button></div><div class="hint" id="co-gift-info"></div></div>
+      <div class="grid-2">
+        <div class="field"><label>Moyen de paiement</label><div class="row" style="gap:6px">${['card', 'twint', 'cash', 'other'].map((m) => `<button type="button" class="chip ${m === st.method ? 'active' : ''}" data-method="${m}">${METHOD_LABEL[m]}</button>`).join('')}</div></div>
+        <div class="field"><label>Collaborateur</label><select id="co-staff">${ctx.staff.filter((x) => x.active).map((x) => `<option value="${x.id}" ${x.id === st.staff ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
+      </div>
+      <div class="field" id="co-change" hidden><label>Montant reçu en espèces</label><div class="row" style="flex-wrap:nowrap"><input id="co-given" type="number" min="0" step="0.05" style="max-width:160px"><b id="co-change-out"></b></div></div>
+      <div class="summary" id="co-sum"></div>`,
+    actions: [
+      { id: 'close', label: 'Annuler', cls: 'btn-ghost' },
+      {
+        id: 'pay', label: 'Encaisser', cls: 'btn-ok',
+        handler: async () => {
+          const t = totals();
+          if (!lines.length) throw new Error('Ajoutez au moins un article.');
+          const method = st.gift && t.giftUse >= t.total ? 'gift_card' : st.method;
+          const r = await api(P('/sales'), {
+            method: 'POST',
+            body: {
+              booking_id: booking?.id, staff_id: Number(st.staff) || undefined, method, discount_cents: st.discount, tip_cents: st.tip,
+              gift_card_code: st.gift?.code, items: lines.map((l) => ({ kind: l.kind, ref_id: l.ref_id, qty: l.qty, unit_cents: l.unit_cents, recipient_name: l.recipient_name })),
+            },
+          });
+          toast(`Vente enregistrée : ${fmt.eur(r.total_cents)}.`);
+          if (r.issued_gift_cards.length) {
+            setTimeout(() => modal({ title: 'Carte(s) cadeau émise(s)', body: r.issued_gift_cards.map((g) => `<p>${fmt.eur(g.amount_cents)} — code <b style="font-size:1.2rem;letter-spacing:.06em">${esc(g.code)}</b></p>`).join('') + '<p class="small muted">Le client peut retrouver sa carte avec ce code sur la page « carte cadeau » du salon.</p>' }));
+          }
+          after();
+        },
+      },
+    ],
+    onOpen: (d) => {
+      const rerender = () => render(d);
+      $('#co-add-product', d).onchange = (e) => {
+        const p = products.find((x) => x.id === Number(e.target.value));
+        if (p) {
+          const ex = lines.find((l) => l.kind === 'product' && l.ref_id === p.id);
+          if (ex) ex.qty++; else lines.push({ kind: 'product', ref_id: p.id, name: p.brand ? `${p.brand} — ${p.name}` : p.name, qty: 1, unit_cents: p.price_cents });
+        }
+        e.target.value = ''; rerender();
+      };
+      $('#co-add-service', d).onchange = (e) => {
+        const x = services.find((y) => y.id === Number(e.target.value));
+        if (x) lines.push({ kind: 'service', ref_id: x.id, name: x.name, qty: 1, unit_cents: x.price_cents });
+        e.target.value = ''; rerender();
+      };
+      $('#co-add-gift', d).onclick = () => {
+        const v = toCents($('#co-gift-amount', d).value);
+        if (v < 1000) return toast('Montant minimum : 10.', 'error');
+        lines.push({ kind: 'gift_card', ref_id: null, name: `Carte cadeau ${fmt.eur(v)}`, qty: 1, unit_cents: v });
+        $('#co-gift-amount', d).value = ''; rerender();
+      };
+      $('#co-gift-check', d).onclick = async () => {
+        try {
+          const g = await api(P(`/gift-cards/${encodeURIComponent($('#co-gift-code', d).value.trim().toUpperCase())}`));
+          st.gift = g;
+          $('#co-gift-info', d).innerHTML = `<span class="badge badge-ok">Solde ${fmt.eur(g.balance_cents)}</span> valable jusqu’au ${esc(g.expires_at)}`;
+        } catch (err) { st.gift = null; $('#co-gift-info', d).innerHTML = `<span class="badge badge-danger">${esc(err.message)}</span>`; }
+        rerender();
+      };
+      d.addEventListener('input', (e) => {
+        if (e.target.dataset.qty) lines[e.target.dataset.qty].qty = Math.max(1, Number(e.target.value) || 1);
+        if (e.target.dataset.price) lines[e.target.dataset.price].unit_cents = toCents(e.target.value);
+        if (e.target.id === 'co-discount') st.discount = toCents(e.target.value);
+        if (e.target.id === 'co-tip') { st.tip = toCents(e.target.value); $$('[data-tip]', d).forEach((c) => c.classList.remove('active')); }
+        if (e.target.id === 'co-staff') st.staff = e.target.value;
+        if (['co-gift-code', 'co-gift-amount'].includes(e.target.id)) return;
+        rerender();
+      });
+      $('#co-staff', d).onchange = (e) => { st.staff = e.target.value; };
+      d.addEventListener('click', (e) => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        if (b.dataset.rm) { lines.splice(Number(b.dataset.rm), 1); rerender(); }
+        if (b.dataset.tip !== undefined) {
+          const sub = totals().sub - Math.min(totals().sub, st.discount);
+          st.tip = Math.round(sub * Number(b.dataset.tip) / 100 / 50) * 50;
+          $('#co-tip', d).value = '';
+          $$('[data-tip]', d).forEach((c) => c.classList.toggle('active', c === b)); rerender();
+        }
+        if (b.dataset.method) { st.method = b.dataset.method; $$('[data-method]', d).forEach((c) => c.classList.toggle('active', c === b)); rerender(); }
+      });
+      d.style.width = 'min(760px, 96vw)';
+      rerender();
+    },
+  });
+}
+
+const tillState = { day: null, tab: 'jour' };
+async function renderTill() {
+  tillState.day ||= ctx.today;
+  const r = await api(P(`/sales?day=${tillState.day}`));
+  const t = r.totals;
+  const tabs = ctx.isStaff ? '' : `<div class="row" style="gap:4px">${[['jour', 'Journée'], ['cartes', 'Cartes cadeaux']].map(([k, l]) => `<button class="chip ${tillState.tab === k ? 'active' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>`;
+  view.innerHTML = `${head('Caisse', `${tabs}<button class="btn btn-ok" id="new-sale">+ Nouvelle vente</button>`)}<div id="till-body"></div>`;
+  $('#new-sale').onclick = () => checkoutModal({ after: renderTill });
+  view.querySelectorAll('[data-tab]').forEach((b) => { b.onclick = () => { tillState.tab = b.dataset.tab; renderTill(); }; });
+  const body = $('#till-body');
+  if (tillState.tab === 'cartes' && !ctx.isStaff) {
+    const cards = await api(P('/gift-cards'));
+    const out = cards.filter((g) => g.status === 'active').reduce((a, g) => a + g.balance_cents, 0);
+    body.innerHTML = `
+      <div class="kpis"><div class="kpi"><div class="label">Cartes actives</div><div class="value">${cards.filter((g) => g.status === 'active' && g.balance_cents > 0).length}</div></div>
+        <div class="kpi"><div class="label">Solde restant à honorer</div><div class="value">${fmt.eur(out)}</div></div>
+        <div class="kpi"><div class="label">Vendues (total)</div><div class="value">${fmt.eur(cards.reduce((a, g) => a + g.initial_cents, 0))}</div></div></div>
+      <div class="card" style="margin-bottom:14px"><div class="row between"><div><b>Vente en ligne</b><div class="small muted">Lien à partager (Instagram, site, vitrine) : vos clients achètent une carte cadeau 24 h/24.</div></div>
+        <a class="btn btn-ghost btn-sm" href="/carte-cadeau.html?s=${encodeURIComponent(ctx.salon.slug)}" target="_blank">Voir la page</a></div></div>
+      <div class="table-wrap"><table><thead><tr><th>Code</th><th>Pour</th><th>Acheteur</th><th>Montant</th><th>Solde</th><th>Expire</th><th>Origine</th></tr></thead><tbody>
+      ${cards.map((g) => `<tr><td><b>${esc(g.code)}</b></td><td>${esc(g.recipient_name || '—')}</td><td class="small">${esc(g.buyer_name || '—')}<div class="muted">${esc(g.buyer_email)}</div></td><td>${fmt.eur(g.initial_cents)}</td><td><b>${fmt.eur(g.balance_cents)}</b></td><td class="small">${esc(g.expires_at)}</td><td><span class="badge">${g.source === 'online' ? 'En ligne' : 'Caisse'}</span></td></tr>`).join('') || '<tr><td colspan="7" class="empty">Aucune carte cadeau pour le moment.</td></tr>'}
+      </tbody></table></div>`;
+    return;
+  }
+  body.innerHTML = `
+    <div class="agenda-toolbar">
+      <button class="btn btn-ghost btn-sm" data-day="-1">‹</button><input type="date" id="till-day" value="${tillState.day}" style="width:auto;padding:6px 10px"><button class="btn btn-ghost btn-sm" data-day="1">›</button>
+      <b>${fmt.date(tillState.day)}</b><div class="grow"></div>
+      ${ctx.isStaff ? '' : `<a class="btn btn-ghost btn-sm" href="${P(`/export/sales.csv?from=${dateUtil.addDays(tillState.day, -30)}&to=${tillState.day}`)}">Export comptable (CSV)</a><button class="btn btn-ghost btn-sm" id="z-report">Clôture de caisse</button>`}
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="label">Encaissé</div><div class="value">${fmt.eur(t.collected_cents)}</div><div class="sub">${t.count} vente(s)</div></div>
+      <div class="kpi"><div class="label">Prestations</div><div class="value">${fmt.eur(t.services_cents)}</div></div>
+      <div class="kpi"><div class="label">Produits</div><div class="value">${fmt.eur(t.products_cents)}</div></div>
+      <div class="kpi"><div class="label">Pourboires</div><div class="value">${fmt.eur(t.tips_cents)}</div></div>
+      ${Object.entries(r.by_method).filter(([, v]) => v).map(([m, v]) => `<div class="kpi"><div class="label">${METHOD_LABEL[m]}</div><div class="value">${fmt.eur(v)}</div></div>`).join('')}
+    </div>
+    <div class="two-col">
+      <div class="card"><h3>Ventes</h3>${r.sales.map((s) => `
+        <div class="list-item" style="${s.voided ? 'opacity:.5;text-decoration:line-through' : ''}">
+          <div class="grow"><b>${s.created_at.slice(11, 16)}</b> · ${esc(s.client_name || 'Client de passage')} <span class="muted small">· ${esc(s.staff_name || '')}</span>
+            <div class="small muted">${s.items.map((i) => `${i.qty > 1 ? `${i.qty}× ` : ''}${esc(i.name)}`).join(', ')}${s.tip_cents ? ` · pourboire ${fmt.eur(s.tip_cents)}` : ''}</div></div>
+          <span class="badge">${METHOD_LABEL[s.method]}</span><b>${fmt.eur(s.total_cents)}</b>
+          ${!s.voided && !ctx.isStaff ? `<button class="btn btn-ghost btn-sm" data-void="${s.id}">Annuler</button>` : ''}
+        </div>`).join('') || '<div class="empty">Aucune vente ce jour-là.</div>'}</div>
+      <div class="stack">
+        <div class="card"><h3>Articles vendus</h3>${r.items.map((i) => `<div class="list-item small"><div class="grow">${esc(i.name)}</div><span class="muted">${i.qty}×</span><b>${fmt.eur(i.total_cents)}</b></div>`).join('') || '<p class="muted small">—</p>'}</div>
+        <div class="card"><h3>Pourboires par collaborateur</h3>${Object.entries(r.tips_by_staff).map(([n, v]) => `<div class="list-item small"><div class="grow">${esc(n)}</div><b>${fmt.eur(v)}</b></div>`).join('') || '<p class="muted small">—</p>'}</div>
+      </div>
+    </div>`;
+  body.querySelectorAll('[data-day]').forEach((b) => { b.onclick = () => { tillState.day = dateUtil.addDays(tillState.day, Number(b.dataset.day)); renderTill(); }; });
+  $('#till-day').onchange = (e) => { if (e.target.value) { tillState.day = e.target.value; renderTill(); } };
+  body.querySelectorAll('[data-void]').forEach((b) => {
+    b.onclick = async () => {
+      const ok = await modal({ title: 'Annuler cette vente ?', body: '<p>Le stock et le solde des cartes cadeaux utilisées sont rétablis. À utiliser en cas d’erreur de saisie.</p>', actions: [{ id: 'close', label: 'Garder', cls: 'btn-ghost' }, { id: 'ok', label: 'Annuler la vente', cls: 'btn-danger' }] });
+      if (!ok) return;
+      await api(P(`/sales/${b.dataset.void}/void`), { method: 'POST', body: {} });
+      toast('Vente annulée.'); renderTill();
+    };
+  });
+  $('#z-report')?.addEventListener('click', () => modal({
+    title: `Clôture de caisse — ${fmt.date(tillState.day, { day: 'numeric', month: 'long', year: 'numeric' })}`,
+    body: `<div class="summary">
+      ${Object.entries(r.by_method).map(([m, v]) => `<div><span>${METHOD_LABEL[m]}</span><b>${fmt.eur(v)}</b></div>`).join('')}
+      <div style="border-top:1px solid var(--line);margin-top:6px;padding-top:6px"><span>Total encaissé</span><b>${fmt.eur(t.collected_cents)}</b></div>
+      <div><span>dont pourboires</span><span>${fmt.eur(t.tips_cents)}</span></div>
+      <div><span>Remises accordées</span><span>${fmt.eur(t.discounts_cents)}</span></div>
+      <div><span>Nombre de ventes</span><span>${t.count}</span></div></div>
+      <p class="small muted" style="margin-top:12px">Comptez votre fond de caisse : les espèces attendues sont de <b>${fmt.eur(r.by_method.cash)}</b> (hors fond de caisse).</p>`,
+    actions: [{ id: 'close', label: 'Fermer', cls: 'btn-ghost' }, { id: 'print', label: 'Imprimer', cls: 'btn-brand', handler: () => { window.print(); return false; } }],
+  }));
+}
+
+async function renderStock() {
+  const list = await api(P('/products'));
+  const low = list.filter((p) => p.active && p.stock <= p.low_stock);
+  const value = list.filter((p) => p.active).reduce((a, p) => a + p.stock * (p.cost_cents || p.price_cents), 0);
+  view.innerHTML = `${head('Stock', '<button class="btn btn-brand" id="add-product">+ Produit</button>')}
+    <div class="kpis">
+      <div class="kpi"><div class="label">Produits actifs</div><div class="value">${list.filter((p) => p.active).length}</div></div>
+      <div class="kpi"><div class="label">À commander</div><div class="value" style="color:${low.length ? 'var(--danger)' : 'inherit'}">${low.length}</div><div class="sub">${low.map((p) => esc(p.name)).slice(0, 3).join(', ')}</div></div>
+      <div class="kpi"><div class="label">Valeur du stock</div><div class="value">${fmt.eur(value)}</div><div class="sub">au prix d’achat</div></div>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th>Produit</th><th>Prix</th><th>Marge</th><th>Stock</th><th style="text-align:right">Ajuster</th></tr></thead><tbody>
+    ${list.map((p) => `<tr style="${p.active ? '' : 'opacity:.5'}">
+      <td><b>${esc(p.name)}</b><div class="small muted">${esc(p.brand)} · ${esc(p.category)}</div></td>
+      <td>${fmt.eur(p.price_cents)}</td>
+      <td class="small">${p.cost_cents ? `${Math.round(((p.price_cents - p.cost_cents) / p.price_cents) * 100)} %` : '—'}</td>
+      <td><span class="badge ${p.stock <= 0 ? 'badge-danger' : p.stock <= p.low_stock ? 'badge-warn' : 'badge-ok'}">${p.stock} en stock</span></td>
+      <td style="text-align:right;white-space:nowrap"><button class="btn btn-ghost btn-sm" data-adj="${p.id}" data-d="-1">−1</button> <button class="btn btn-ghost btn-sm" data-adj="${p.id}" data-d="1">+1</button> <button class="btn btn-ghost btn-sm" data-restock="${p.id}">Réassort</button> <button class="btn btn-ghost btn-sm" data-edit="${p.id}">Modifier</button></td></tr>`).join('') || '<tr><td colspan="5" class="empty">Ajoutez les produits que vous vendez (shampoings, soins, cires…) pour les encaisser et suivre le stock.</td></tr>'}
+    </tbody></table></div>`;
+  $('#add-product').onclick = () => productForm();
+  view.querySelectorAll('[data-edit]').forEach((b) => { b.onclick = () => productForm(list.find((p) => p.id === Number(b.dataset.edit))); });
+  view.querySelectorAll('[data-adj]').forEach((b) => {
+    b.onclick = async () => {
+      try { await api(P(`/products/${b.dataset.adj}/stock`), { method: 'POST', body: { delta: Number(b.dataset.d), reason: 'correction' } }); renderStock(); } catch (err) { toast(err.message, 'error'); }
+    };
+  });
+  view.querySelectorAll('[data-restock]').forEach((b) => {
+    b.onclick = () => modal({
+      title: 'Réassort', body: '<div class="field"><label>Quantité reçue</label><input id="rs-qty" type="number" min="1" value="6"></div>',
+      actions: [{ id: 'close', label: 'Annuler', cls: 'btn-ghost' }, { id: 'ok', label: 'Ajouter au stock', cls: 'btn-brand', handler: async (d) => { await api(P(`/products/${b.dataset.restock}/stock`), { method: 'POST', body: { delta: Number($('#rs-qty', d).value), reason: 'réassort' } }); toast('Stock mis à jour.'); renderStock(); } }],
+    });
+  });
+}
+
+function productForm(p = null) {
+  modal({
+    title: p ? 'Modifier le produit' : 'Nouveau produit',
+    body: `<form id="pf">
+      <div class="grid-2"><div class="field"><label>Nom</label><input name="name" required value="${esc(p?.name || '')}" placeholder="Shampoing nutritif 250 ml"></div>
+        <div class="field"><label>Marque</label><input name="brand" value="${esc(p?.brand || '')}"></div></div>
+      <div class="grid-3"><div class="field"><label>Prix de vente (${CURRENCY})</label><input name="price" type="number" min="0" step="0.5" value="${p ? p.price_cents / 100 : ''}"></div>
+        <div class="field"><label>Prix d’achat (${CURRENCY})</label><input name="cost" type="number" min="0" step="0.5" value="${p ? p.cost_cents / 100 : ''}"></div>
+        <div class="field"><label>Alerte sous</label><input name="low_stock" type="number" min="0" value="${p?.low_stock ?? 3}"></div></div>
+      ${p ? '' : '<div class="grid-2"><div class="field"><label>Stock initial</label><input name="stock" type="number" min="0" value="0"></div><div class="field"><label>Catégorie</label><input name="category" value="Produits"></div></div>'}
+      ${p ? `<label class="check"><input type="checkbox" name="active" ${p.active ? 'checked' : ''}> En vente</label>` : ''}</form>`,
+    actions: [{ id: 'close', label: 'Annuler', cls: 'btn-ghost' }, {
+      id: 'save', label: 'Enregistrer', cls: 'btn-brand',
+      handler: async (d) => {
+        const f = formData($('#pf', d));
+        await api(P(p ? `/products/${p.id}` : '/products'), { method: p ? 'PUT' : 'POST', body: { ...f, category: f.category || p?.category, active: p ? !!f.active : true } });
+        toast('Produit enregistré.'); renderStock();
+      },
+    }],
+  });
+}
+
 // =====================================================================
 // Router
 // =====================================================================
 const ROUTES = {
   dashboard: renderDashboard, agenda: renderAgenda, clients: () => renderClients(), services: renderServices,
-  team: renderTeam, reviews: renderReviews, automations: renderAutomations, settings: renderSettings, billing: renderBilling, site: renderSiteEditor,
+  team: renderTeam, reviews: renderReviews, automations: renderAutomations, settings: renderSettings, billing: renderBilling, site: renderSiteEditor, caisse: renderTill, stock: renderStock,
 };
 
 async function route() {

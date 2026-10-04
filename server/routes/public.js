@@ -160,6 +160,58 @@ router.post('/salons/:slug/waitlist', rateLimit('waitlist', 10, 10 * 60 * 1000),
   res.status(201).json({ ok: true });
 });
 
+// ---- Gift cards (sold online, redeemed at the salon's till) ----
+
+function sendGiftCardEmail(card, salon) {
+  if (!card.buyer_email) return;
+  const body = `Merci pour votre achat !\n\nCarte cadeau ${salon.name} : ${(card.initial_cents / 100).toFixed(2)} ${process.env.CURRENCY || 'CHF'}${card.recipient_name ? ` pour ${card.recipient_name}` : ''}.\nCode : ${card.code}\nÀ imprimer ou à transférer : ${APP_URL}/carte-cadeau.html?c=${card.code}\nValable jusqu’au ${card.expires_at}.`;
+  run("INSERT INTO notifications (salon_id, kind, channel, recipient, subject, body) VALUES (?, 'gift_card', 'email', ?, ?, ?)", salon.id, card.buyer_email, `Votre carte cadeau ${salon.name}`, body);
+  require('../mailer').send({ channel: 'email', to: card.buyer_email, subject: `Votre carte cadeau ${salon.name}`, body, fromName: salon.name });
+}
+
+router.post('/salons/:slug/gift-cards', rateLimit('gift', 10, 10 * 60 * 1000), async (req, res) => {
+  const salon = salonBySlug(req.params.slug);
+  if (!salon.giftcards_enabled || !billing.salonActive(salon)) throw new HttpError(403, 'Ce salon ne vend pas de cartes cadeaux en ligne pour le moment.');
+  const b = req.body || {};
+  const amount = Math.round(Number(b.amount) * 100);
+  if (!EMAIL_RE.test(String(b.buyer_email || ''))) throw new HttpError(400, 'Adresse e-mail invalide.');
+  if (clean(b.buyer_name, 120).length < 2) throw new HttpError(400, 'Merci d’indiquer votre nom.');
+  const live = billing.depositMode(salon) === 'stripe';
+  const pos = require('../pos');
+  const card = pos.issueGiftCard(salon.id, {
+    amountCents: amount, buyerName: b.buyer_name, buyerEmail: b.buyer_email, recipientName: b.recipient_name, message: b.message,
+    source: 'online', status: live ? 'pending' : 'active',
+  });
+  if (!live) {
+    sendGiftCardEmail(card, salon);
+    return res.status(201).json({ code: card.code });
+  }
+  const session = await payments.stripe('POST', '/checkout/sessions', {
+    mode: 'payment', customer_email: card.buyer_email,
+    line_items: [{ quantity: 1, price_data: { currency: (process.env.CURRENCY || 'CHF').toLowerCase(), unit_amount: card.initial_cents, product_data: { name: `Carte cadeau ${salon.name}` } } }],
+    metadata: { kind: 'gift_card', gift_card_id: String(card.id), salon_id: String(salon.id) },
+    success_url: `${APP_URL}/carte-cadeau.html?c=${card.code}`, cancel_url: `${APP_URL}/carte-cadeau.html?s=${salon.slug}`,
+  }, { account: salon.stripe_account_id });
+  run('UPDATE gift_cards SET stripe_session_id = ? WHERE id = ?', session.id, card.id);
+  res.status(201).json({ checkout_url: session.url });
+});
+
+router.get('/gift-cards/:code', rateLimit('giftlookup', 60, 10 * 60 * 1000), async (req, res) => {
+  let g = one('SELECT * FROM gift_cards WHERE code = ? COLLATE NOCASE', clean(req.params.code, 20).toUpperCase());
+  if (!g || g.status === 'void') throw new HttpError(404, 'Carte cadeau introuvable.');
+  const salon = one('SELECT * FROM salons WHERE id = ?', g.salon_id);
+  if (g.status === 'pending' && g.stripe_session_id && payments.enabled()) {
+    // Back from Checkout: confirm without waiting for the webhook.
+    const session = await payments.retrieveSession(g.stripe_session_id, salon.stripe_account_id).catch(() => null);
+    if (session?.payment_status === 'paid' && billing.activateGiftCard(g.id)) g = one('SELECT * FROM gift_cards WHERE id = ?', g.id);
+  }
+  res.json({
+    code: g.code, status: g.status, initial_cents: g.initial_cents, balance_cents: g.balance_cents, recipient_name: g.recipient_name,
+    buyer_name: g.buyer_name, message: g.message, expires_at: g.expires_at,
+    salon: { name: salon.name, slug: salon.slug, accent: salon.accent, address: salon.address, city: salon.city, phone: salon.phone },
+  });
+});
+
 // ---- Self-service booking management (magic link, no account needed) ----
 
 function bookingByToken(token) {

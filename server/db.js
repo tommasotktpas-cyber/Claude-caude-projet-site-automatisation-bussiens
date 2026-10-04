@@ -280,16 +280,94 @@ addColumn('users', 'staff_id', 'INTEGER REFERENCES staff(id) ON DELETE SET NULL'
 addColumn('salons', 'style_catalog', "TEXT NOT NULL DEFAULT ''");
 addColumn('bookings', 'style_json', 'TEXT');
 addColumn('bookings', 'style_image', 'TEXT');
+// Point of sale, stock and gift cards.
+db.exec(`
+CREATE TABLE IF NOT EXISTS products (
+  id INTEGER PRIMARY KEY,
+  salon_id INTEGER NOT NULL REFERENCES salons(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  brand TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT 'Produits',
+  price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
+  cost_cents INTEGER NOT NULL DEFAULT 0,
+  stock INTEGER NOT NULL DEFAULT 0,
+  low_stock INTEGER NOT NULL DEFAULT 3,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS gift_cards (
+  id INTEGER PRIMARY KEY,
+  salon_id INTEGER NOT NULL REFERENCES salons(id) ON DELETE CASCADE,
+  code TEXT NOT NULL UNIQUE,
+  initial_cents INTEGER NOT NULL,
+  balance_cents INTEGER NOT NULL,
+  buyer_name TEXT NOT NULL DEFAULT '',
+  buyer_email TEXT NOT NULL DEFAULT '',
+  recipient_name TEXT NOT NULL DEFAULT '',
+  message TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'caisse' CHECK (source IN ('online','caisse')),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('pending','active','void')),
+  stripe_session_id TEXT,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS sales (
+  id INTEGER PRIMARY KEY,
+  salon_id INTEGER NOT NULL REFERENCES salons(id) ON DELETE CASCADE,
+  booking_id INTEGER REFERENCES bookings(id) ON DELETE SET NULL,
+  client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+  staff_id INTEGER REFERENCES staff(id) ON DELETE SET NULL,
+  subtotal_cents INTEGER NOT NULL,
+  discount_cents INTEGER NOT NULL DEFAULT 0,
+  tip_cents INTEGER NOT NULL DEFAULT 0,
+  total_cents INTEGER NOT NULL,
+  method TEXT NOT NULL CHECK (method IN ('cash','card','twint','gift_card','other')),
+  gift_card_id INTEGER REFERENCES gift_cards(id) ON DELETE SET NULL,
+  gift_card_cents INTEGER NOT NULL DEFAULT 0,
+  note TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  voided INTEGER NOT NULL DEFAULT 0,
+  day TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sales_salon_day ON sales (salon_id, day);
+CREATE TABLE IF NOT EXISTS sale_items (
+  id INTEGER PRIMARY KEY,
+  sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('service','product','gift_card')),
+  ref_id INTEGER,
+  name TEXT NOT NULL,
+  qty INTEGER NOT NULL DEFAULT 1,
+  unit_cents INTEGER NOT NULL,
+  total_cents INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS stock_movements (
+  id INTEGER PRIMARY KEY,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  delta INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  sale_id INTEGER REFERENCES sales(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`);
+addColumn('salons', 'giftcards_enabled', 'INTEGER NOT NULL DEFAULT 1');
+addColumn('sales', 'prepaid_cents', 'INTEGER NOT NULL DEFAULT 0');
+
 db.exec(`CREATE TABLE IF NOT EXISTS stripe_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
 
-/** Runs fn inside an IMMEDIATE transaction (serialises writers — prevents double booking). */
+/** Runs fn inside an IMMEDIATE transaction (serialises writers — prevents double booking). Re-entrant. */
+let txDepth = 0;
 function tx(fn) {
+  if (txDepth > 0) return fn();
   db.exec('BEGIN IMMEDIATE');
+  txDepth++;
   try {
     const out = fn();
+    txDepth--;
     db.exec('COMMIT');
     return out;
   } catch (err) {
+    txDepth--;
     db.exec('ROLLBACK');
     throw err;
   }

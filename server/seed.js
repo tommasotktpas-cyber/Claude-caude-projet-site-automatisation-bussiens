@@ -221,12 +221,50 @@ function seed() {
         }
       }
     });
+    // Retail products, a few gift cards, and till history for the demo salon.
+    const PRODUCTS = {
+      coiffure: [['Shampoing nutritif 250 ml', 'Kérastase', 34, 17], ['Masque réparateur', 'Kérastase', 48, 24], ['Huile sublimatrice', 'Moroccanoil', 42, 21], ['Laque fixation forte', 'L’Oréal Pro', 22, 9]],
+      barbier: [['Huile à barbe', 'Proraso', 24, 10], ['Cire coiffante mate', 'Reuzel', 26, 12], ['Baume après-rasage', 'Proraso', 19, 8]],
+      ongles: [['Huile cuticules', 'OPI', 18, 7], ['Vernis longue tenue', 'OPI', 21, 9]],
+      spa: [['Huile de massage 100 ml', 'Cinq Mondes', 39, 18], ['Crème visage hydratante', 'Decléor', 65, 30]],
+      esthetique: [['Sérum éclat', 'Decléor', 59, 27], ['Crème mains', 'Nuxe', 16, 7]],
+      massage: [['Bougie de massage', 'Lumea', 29, 11]],
+    };
+    for (const salon of all('SELECT id, category FROM salons')) {
+      for (const [name, brand, price, cost] of PRODUCTS[salon.category] || []) {
+        const stock = Math.floor(rand() * 14);
+        run('INSERT INTO products (salon_id, name, brand, price_cents, cost_cents, stock, low_stock) VALUES (?,?,?,?,?,?,3)', salon.id, name, brand, eur(price), eur(cost), stock);
+      }
+      const gift = require('./pos');
+      for (const [amount, buyer, to] of [[100, 'Sophie Klein', 'Julie'], [150, 'Marc Weber', 'Anaïs'], [80, 'Paul Muller', '']]) {
+        const g = gift.issueGiftCard(salon.id, { amountCents: amount * 100, buyerName: buyer, buyerEmail: `${buyer.split(' ')[0].toLowerCase()}@exemple.ch`, recipientName: to, source: rand() > 0.5 ? 'online' : 'caisse' });
+        if (rand() > 0.6) run('UPDATE gift_cards SET balance_cents = balance_cents - 4000 WHERE id = ?', g.id);
+      }
+    }
+    const demo = one('SELECT id FROM salons ORDER BY id LIMIT 1');
+    const demoProducts = all('SELECT * FROM products WHERE salon_id = ?', demo.id);
+    const methods = ['card', 'card', 'card', 'twint', 'twint', 'cash'];
+    for (const b of all("SELECT b.*, sv.name AS service_name FROM bookings b JOIN services sv ON sv.id = b.service_id WHERE b.salon_id = ? AND b.status = 'completed' AND b.start_at >= ?", demo.id, `${T.addDays(today, -14)}T00:00`)) {
+      const withProduct = rand() < 0.25 ? demoProducts[Math.floor(rand() * demoProducts.length)] : null;
+      const tip = rand() < 0.35 ? [200, 500, 500, 1000][Math.floor(rand() * 4)] : 0;
+      const sub = b.price_cents + (withProduct ? withProduct.price_cents : 0);
+      const saleId = Number(run(
+        `INSERT INTO sales (salon_id, booking_id, client_id, staff_id, subtotal_cents, tip_cents, total_cents, method, day, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        demo.id, b.id, b.client_id, b.staff_id, sub, tip, sub + tip, methods[Math.floor(rand() * methods.length)], b.start_at.slice(0, 10), `${b.start_at.slice(0, 10)} ${b.end_at.slice(11)}:00`,
+      ).lastInsertRowid);
+      run("INSERT INTO sale_items (sale_id, kind, ref_id, name, qty, unit_cents, total_cents) VALUES (?, 'service', ?, ?, 1, ?, ?)", saleId, b.service_id, b.service_name, b.price_cents, b.price_cents);
+      if (withProduct) {
+        run("INSERT INTO sale_items (sale_id, kind, ref_id, name, qty, unit_cents, total_cents) VALUES (?, 'product', ?, ?, 1, ?, ?)", saleId, withProduct.id, `${withProduct.brand} — ${withProduct.name}`, withProduct.price_cents, withProduct.price_cents);
+      }
+    }
+
     run('UPDATE clients SET created_at = (SELECT MIN(created_at) FROM bookings b WHERE b.client_id = clients.id) WHERE EXISTS (SELECT 1 FROM bookings b WHERE b.client_id = clients.id)');
   });
 }
 
 function reset() {
-  db.exec(`DELETE FROM notifications; DELETE FROM design_requests; DELETE FROM template_licenses; DELETE FROM sites; DELETE FROM waitlist; DELETE FROM reviews; DELETE FROM bookings; DELETE FROM clients;
+  db.exec(`DELETE FROM notifications; DELETE FROM sale_items; DELETE FROM sales; DELETE FROM stock_movements; DELETE FROM products; DELETE FROM gift_cards; DELETE FROM design_requests; DELETE FROM template_licenses; DELETE FROM sites; DELETE FROM waitlist; DELETE FROM reviews; DELETE FROM bookings; DELETE FROM clients;
            DELETE FROM time_off; DELETE FROM staff_services; DELETE FROM staff_hours; DELETE FROM staff; DELETE FROM services;
            DELETE FROM opening_hours; DELETE FROM salons; DELETE FROM users WHERE role != 'admin';`);
 }

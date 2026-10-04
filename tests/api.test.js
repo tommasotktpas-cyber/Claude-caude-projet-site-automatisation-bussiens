@@ -314,3 +314,48 @@ test('3D studio: style sheet saved with the booking, only offered cuts, visible 
   assert.match(sheet.body.summary, /Dégradé américain · dessus 3.5 cm/);
   assert.match(sheet.body.summary, /barbe courte/);
 });
+
+test('till: checkout a booking with products, tip and gift card; stock, report and void', async () => {
+  const uid = Number(run("INSERT INTO users (email, password_hash, name, role) VALUES ('till@test.lu', ?, 'Owner', 'pro')", hashPassword('password123')).lastInsertRowid);
+  const salon = createSalon(uid, {
+    name: 'Salon Caisse', city: 'Genève', category: 'coiffure',
+    hours: [{ weekday: 2, open: '09:00', close: '12:00' }],
+    services: [{ name: 'Coupe', duration_min: 60, price_cents: 8000 }], staff: [{ name: 'Lea' }],
+  });
+  const owner = (await req('/api/auth/login', { method: 'POST', body: { email: 'till@test.lu', password: 'password123' } })).cookie;
+  const sv = one('SELECT id FROM services WHERE salon_id = ?', salon.id).id;
+  const bk = await req('/api/pro/bookings', { method: 'POST', cookie: owner, body: { service_id: sv, date: TUE, time: '09:00', customer: { name: 'Client Caisse' } } });
+  const prod = await req('/api/pro/products', { method: 'POST', cookie: owner, body: { name: 'Shampoing', brand: 'Kérastase', price: 32, stock: 2 } });
+
+  // Gift card sold online (simulated payments) then used at the till.
+  const gc = await req(`/api/public/salons/${salon.slug}/gift-cards`, { method: 'POST', body: { amount: 50, buyer_name: 'Marie', buyer_email: 'marie@test.ch', recipient_name: 'Paul' } });
+  assert.match(gc.body.code, /^LUM-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+  const view = await req(`/api/public/gift-cards/${gc.body.code}`);
+  assert.equal(view.body.balance_cents, 5000);
+
+  const tooMuch = await req('/api/pro/sales', { method: 'POST', cookie: owner, body: { items: [{ kind: 'product', ref_id: prod.body.id, qty: 3 }], method: 'cash' } });
+  assert.equal(tooMuch.status, 409, 'cannot sell more than stock');
+
+  const sale = await req('/api/pro/sales', { method: 'POST', cookie: owner, body: {
+    booking_id: bk.body.id, method: 'card', tip_cents: 500, discount_cents: 1000, gift_card_code: gc.body.code.toLowerCase(),
+    items: [{ kind: 'service', ref_id: sv, unit_cents: 9000 }, { kind: 'product', ref_id: prod.body.id, qty: 1 }, { kind: 'gift_card', unit_cents: 10000, recipient_name: 'Sophie' }],
+  } });
+  assert.equal(sale.status, 201);
+  assert.equal(sale.body.total_cents, 9000 + 3200 + 10000 - 1000 + 500);
+  assert.equal(sale.body.gift_card_used_cents, 5000);
+  assert.equal(sale.body.issued_gift_cards[0].amount_cents, 10000);
+  assert.equal(one('SELECT stock FROM products WHERE id = ?', prod.body.id).stock, 1);
+  assert.equal(one('SELECT status FROM bookings WHERE id = ?', bk.body.id).status, 'completed', 'booking closed at checkout');
+  assert.equal((await req('/api/pro/sales', { method: 'POST', cookie: owner, body: { booking_id: bk.body.id, method: 'cash', items: [{ kind: 'service', ref_id: sv }] } })).status, 409, 'no double checkout');
+
+  const report = (await req('/api/pro/sales', { cookie: owner })).body;
+  assert.equal(report.totals.count, 1);
+  assert.equal(report.totals.tips_cents, 500);
+  assert.equal(report.by_method.gift_card, 5000);
+  assert.equal(report.by_method.card, sale.body.total_cents - 5000);
+  assert.equal(report.tips_by_staff.Lea, 500);
+
+  assert.equal((await req(`/api/pro/sales/${sale.body.id}/void`, { method: 'POST', cookie: owner, body: {} })).status, 200);
+  assert.equal(one('SELECT stock FROM products WHERE id = ?', prod.body.id).stock, 2, 'void restores stock');
+  assert.equal((await req(`/api/public/gift-cards/${gc.body.code}`)).body.balance_cents, 5000, 'void refunds the gift card');
+});

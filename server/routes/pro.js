@@ -19,8 +19,8 @@ router.use(requireRole('pro', 'admin', 'staff'));
 
 // Employees (role "staff") only reach their own agenda, bookings and the client file.
 const STAFF_ALLOWED = [
-  ['GET', /^\/(salon|staff|services|agenda|slots|clients(\/\d+)?|bookings\/\d+\/style)$/],
-  ['POST', /^\/bookings$/],
+  ['GET', /^\/(salon|staff|services|agenda|slots|clients(\/\d+)?|bookings\/\d+\/style|products|sales|gift-cards\/[\w-]+)$/],
+  ['POST', /^\/(bookings|sales)$/],
   ['PATCH', /^\/bookings\/\d+$/],
   ['PUT', /^\/clients\/\d+$/],
 ];
@@ -101,7 +101,7 @@ router.put('/salon', (req, res) => {
   if (name.length < 2) throw new HttpError(400, 'Nom trop court.');
   run(
     `UPDATE salons SET name=?, category=?, description=?, address=?, city=?, zip=?, phone=?, email=?, cover_url=?, accent=?,
-       deposit_percent=?, cancel_hours=?, buffer_min=?, slot_step=?, min_notice_min=?, max_days_ahead=?, loyalty_enabled=?, published=?
+       deposit_percent=?, cancel_hours=?, buffer_min=?, slot_step=?, min_notice_min=?, max_days_ahead=?, loyalty_enabled=?, published=?, giftcards_enabled=?
      WHERE id=?`,
     name,
     CATEGORIES.includes(b.category) ? b.category : s.category,
@@ -114,6 +114,7 @@ router.put('/salon', (req, res) => {
     int(b.min_notice_min, 0, 10080, s.min_notice_min), int(b.max_days_ahead, 1, 365, s.max_days_ahead),
     b.loyalty_enabled === undefined ? s.loyalty_enabled : (b.loyalty_enabled ? 1 : 0),
     b.published === undefined ? s.published : (b.published ? 1 : 0),
+    b.giftcards_enabled === undefined ? s.giftcards_enabled : (b.giftcards_enabled ? 1 : 0),
     s.id,
   );
   res.json({ ok: true });
@@ -544,6 +545,107 @@ router.get('/waitlist', (req, res) => {
   ));
 });
 
+
+// ---------- Point of sale, stock, gift cards ----------
+
+const pos = require('../pos');
+
+function productFields(b) {
+  const name = clean(b.name, 120);
+  if (name.length < 2) throw new HttpError(400, 'Nom du produit requis.');
+  const price = Math.round(Number(b.price) * 100);
+  if (!Number.isFinite(price) || price < 0) throw new HttpError(400, 'Prix invalide.');
+  return {
+    name, brand: clean(b.brand, 80), category: clean(b.category, 60) || 'Produits', price,
+    cost: Math.max(0, Math.round(Number(b.cost || 0) * 100)) || 0,
+    low: int(b.low_stock, 0, 9999, 3), active: b.active === false ? 0 : 1,
+  };
+}
+
+router.get('/products', (req, res) => {
+  res.json(all('SELECT * FROM products WHERE salon_id = ? ORDER BY active DESC, category, name', req.salon.id));
+});
+
+router.post('/products', (req, res) => {
+  const f = productFields(req.body || {});
+  const stock = int(req.body?.stock, 0, 99999, 0);
+  const id = tx(() => {
+    const pid = Number(run('INSERT INTO products (salon_id, name, brand, category, price_cents, cost_cents, stock, low_stock, active) VALUES (?,?,?,?,?,?,?,?,?)',
+      req.salon.id, f.name, f.brand, f.category, f.price, f.cost, stock, f.low, f.active).lastInsertRowid);
+    if (stock) run("INSERT INTO stock_movements (product_id, delta, reason) VALUES (?,?, 'stock initial')", pid, stock);
+    return pid;
+  });
+  res.status(201).json({ id });
+});
+
+router.put('/products/:id', (req, res) => {
+  const f = productFields(req.body || {});
+  const r = run('UPDATE products SET name=?, brand=?, category=?, price_cents=?, cost_cents=?, low_stock=?, active=? WHERE id=? AND salon_id=?',
+    f.name, f.brand, f.category, f.price, f.cost, f.low, f.active, Number(req.params.id), req.salon.id);
+  if (!r.changes) throw new HttpError(404, 'Produit introuvable.');
+  res.json({ ok: true });
+});
+
+router.post('/products/:id/stock', (req, res) => {
+  const p = one('SELECT * FROM products WHERE id = ? AND salon_id = ?', Number(req.params.id), req.salon.id);
+  if (!p) throw new HttpError(404, 'Produit introuvable.');
+  const delta = int(req.body?.delta, -99999, 99999, 0);
+  if (!delta) throw new HttpError(400, 'Quantité invalide.');
+  if (p.stock + delta < 0) throw new HttpError(400, 'Le stock ne peut pas être négatif.');
+  tx(() => {
+    run('UPDATE products SET stock = stock + ? WHERE id = ?', delta, p.id);
+    run('INSERT INTO stock_movements (product_id, delta, reason) VALUES (?,?,?)', p.id, delta, clean(req.body?.reason, 60) || (delta > 0 ? 'réassort' : 'correction'));
+  });
+  res.json({ stock: p.stock + delta });
+});
+
+router.delete('/products/:id', (req, res) => {
+  const r = run('UPDATE products SET active = 0 WHERE id = ? AND salon_id = ?', Number(req.params.id), req.salon.id);
+  if (!r.changes) throw new HttpError(404, 'Produit introuvable.');
+  res.json({ ok: true });
+});
+
+router.post('/sales', (req, res) => {
+  const b = { ...(req.body || {}) };
+  if (req.staffId) b.staff_id = req.staffId;
+  res.status(201).json(pos.createSale(req.salon, req.user.id, b));
+});
+
+router.get('/sales', (req, res) => {
+  const day = T.isDate(req.query.day) ? req.query.day : T.now().date;
+  res.json(pos.dayReport(req.salon.id, day));
+});
+
+router.post('/sales/:id/void', (req, res) => {
+  pos.voidSale(req.salon.id, Number(req.params.id));
+  res.json({ ok: true });
+});
+
+router.get('/export/sales.csv', (req, res) => {
+  const from = T.isDate(req.query.from) ? req.query.from : T.addDays(T.now().date, -30);
+  const to = T.isDate(req.query.to) ? req.query.to : T.now().date;
+  const rows = all(
+    `SELECT s.day, s.created_at, s.id, st.name AS staff, c.name AS client, s.subtotal_cents, s.discount_cents, s.tip_cents, s.total_cents, s.method, s.gift_card_cents, s.voided
+     FROM sales s LEFT JOIN staff st ON st.id = s.staff_id LEFT JOIN clients c ON c.id = s.client_id
+     WHERE s.salon_id = ? AND s.day BETWEEN ? AND ? ORDER BY s.created_at`, req.salon.id, from, to,
+  );
+  const cell = (v) => `"${String(v ?? '').replace(/"/g, '""').replace(/^[=+\-@]/, "'$&")}"`;
+  const chf = (c) => (c / 100).toFixed(2);
+  const csv = ['jour;heure;vente;collaborateur;client;sous_total;remise;pourboire;total;moyen;carte_cadeau;annulee',
+    ...rows.map((r) => [r.day, r.created_at.slice(11, 16), r.id, r.staff, r.client, chf(r.subtotal_cents), chf(r.discount_cents), chf(r.tip_cents), chf(r.total_cents), pos.METHODS[r.method], chf(r.gift_card_cents), r.voided ? 'oui' : 'non'].map(cell).join(';'))].join('\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="ventes-${from}-${to}.csv"`);
+  res.send('\ufeff' + csv);
+});
+
+router.get('/gift-cards', (req, res) => {
+  res.json(all("SELECT * FROM gift_cards WHERE salon_id = ? AND status != 'pending' ORDER BY created_at DESC LIMIT 300", req.salon.id));
+});
+
+router.get('/gift-cards/:code', (req, res) => {
+  const g = pos.findGiftCard(req.salon.id, req.params.code);
+  res.json({ code: g.code, balance_cents: g.balance_cents, initial_cents: g.initial_cents, expires_at: g.expires_at, recipient_name: g.recipient_name });
+});
 
 // ---------- 3D haircut studio ----------
 

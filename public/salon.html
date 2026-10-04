@@ -113,6 +113,7 @@
                 ${data.staff.map((p) => `<div class="row" style="gap:8px"><span class="avatar sm" style="--c:${esc(p.color)}">${esc(fmt.initials(p.name))}</span><div class="small"><b>${esc(p.name.split(' ')[0])}</b><div class="muted">${esc(p.title)}</div></div></div>`).join('')}
               </div></div>` : ''}
               ${embed ? '' : `<a class="btn btn-ghost btn-block" href="/s/${encodeURIComponent(s.slug)}">Visiter le site du salon</a>`}
+              ${s.giftcards_enabled && s.online_booking ? `<a class="btn btn-ghost btn-block" href="/carte-cadeau.html?s=${encodeURIComponent(s.slug)}" target="${embed ? '_blank' : '_self'}">🎁 Offrir une carte cadeau</a>` : ''}
               <div class="small muted">${s.phone ? `Tél. <a href="tel:${esc(s.phone.replace(/\s/g, ''))}">${esc(s.phone)}</a>` : ''}</div>
             </div>
           </aside>

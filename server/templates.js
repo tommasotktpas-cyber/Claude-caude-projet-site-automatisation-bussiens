@@ -217,7 +217,7 @@ function renderSite({ salon, services, staff, hours, reviews, rating, content, t
     sections.push(`<section id="infos" class="section alt"><div class="wrap grid2">
       <div><p class="label">Nous trouver</p><h2>Horaires & accès</h2>
         <p class="big">${esc(salon.address)}<br>${esc(salon.zip)} ${esc(salon.city)}</p>
-        <div class="actions"><a class="btn btn--ghost" href="${esc(mapsUrl)}" target="_blank" rel="noopener">Itinéraire</a>${salon.phone ? `<a class="btn btn--ghost" href="tel:${esc(salon.phone.replace(/\s/g, ''))}">${esc(salon.phone)}</a>` : ''}</div>
+        <div class="actions"><a class="btn btn--ghost" href="${esc(mapsUrl)}" target="_blank" rel="noopener">Itinéraire</a>${salon.giftcards_enabled ? `<a class="btn btn--ghost" href="/carte-cadeau.html?s=${slug}">Offrir une carte cadeau</a>` : ''}${salon.phone ? `<a class="btn btn--ghost" href="tel:${esc(salon.phone.replace(/\s/g, ''))}">${esc(salon.phone)}</a>` : ''}</div>
         ${socialLinks ? `<div class="socials">${socialLinks}</div>` : ''}</div>
       <div class="card hours">${[1, 2, 3, 4, 5, 6, 0].map((wd) => `<div class="${wd === today ? 'today' : ''}"><span>${WEEKDAYS[wd]}</span><span>${byDay[wd] ? byDay[wd].join(', ') : 'Fermé'}</span></div>`).join('')}</div>
     </div></section>`);

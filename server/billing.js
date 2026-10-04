@@ -74,6 +74,21 @@ function refundDeposit(booking) {
     .catch((err) => console.error('[billing] refund failed:', err.message));
 }
 
+/** Online gift card paid → active, code e-mailed to the buyer. */
+function activateGiftCard(id) {
+  const g = one('SELECT * FROM gift_cards WHERE id = ?', id);
+  if (!g || g.status !== 'pending') return false;
+  run("UPDATE gift_cards SET status = 'active' WHERE id = ?", id);
+  const salon = one('SELECT * FROM salons WHERE id = ?', g.salon_id);
+  if (g.buyer_email) {
+    const { APP_URL } = require('./notifications');
+    const body = `Merci pour votre achat !\n\nCarte cadeau ${salon.name} : ${(g.initial_cents / 100).toFixed(2)} ${process.env.CURRENCY || 'CHF'}.\nCode : ${g.code}\n${APP_URL}/carte-cadeau.html?c=${g.code}`;
+    run("INSERT INTO notifications (salon_id, kind, channel, recipient, subject, body) VALUES (?, 'gift_card', 'email', ?, ?, ?)", salon.id, g.buyer_email, `Votre carte cadeau ${salon.name}`, body);
+    require('./mailer').send({ channel: 'email', to: g.buyer_email, subject: `Votre carte cadeau ${salon.name}`, body, fromName: salon.name });
+  }
+  return true;
+}
+
 /** Releases slots held by deposits that were never paid (Checkout expires after 30 min). */
 function releaseUnpaidHolds() {
   const { notifyWaitlist } = require('./notifications');
@@ -101,6 +116,7 @@ async function handleStripeEvent(event) {
         addLicense(Number(meta.salon_id), meta.template, meta.billing, { subscriptionId: obj.subscription });
         if (obj.customer) run('UPDATE salons SET stripe_customer_id = COALESCE(stripe_customer_id, ?) WHERE id = ?', obj.customer, Number(meta.salon_id));
       } else if (meta.kind === 'deposit') markDepositPaid(Number(meta.booking_id), obj.payment_intent);
+      else if (meta.kind === 'gift_card') activateGiftCard(Number(meta.gift_card_id));
       break;
     case 'customer.subscription.deleted':
       subscriptionEnded(obj.id);
@@ -116,5 +132,5 @@ async function handleStripeEvent(event) {
 
 module.exports = {
   salonActive, depositMode, activatePlan, addLicense, subscriptionEnded, markDepositPaid, refundDeposit,
-  releaseUnpaidHolds, handleStripeEvent,
+  releaseUnpaidHolds, handleStripeEvent, activateGiftCard,
 };
