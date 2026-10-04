@@ -162,7 +162,7 @@ async function mountChrome() {
     const { user } = await api('/api/auth/me');
     const slot = $('#nav-session');
     if (user && slot) {
-      const target = user.role === 'pro' || role === 'staff' ? '/app' : user.role === 'admin' ? '/admin' : '/compte';
+      const target = user.role === 'pro' || user.role === 'staff' ? '/app' : user.role === 'admin' ? '/admin' : '/compte';
       const label = user.role === 'client' ? 'Mon compte' : user.role === 'admin' ? 'Admin' : user.role === 'staff' ? 'Mon agenda' : 'Mon espace pro';
       slot.innerHTML = `<a href="${target}" class="btn btn-sm">${label}</a>`;
     }
