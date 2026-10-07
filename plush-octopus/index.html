@@ -274,7 +274,7 @@ struct VOut {
 
 const PI = 3.14159265;
 const TAU = 6.2831853;
-const TENT_LEN = 2.1;
+const TENT_LEN = 1.75;
 
 fn hash3(p : vec3f) -> f32 {
   var q = fract(p * 0.3183099 + vec3f(0.11, 0.17, 0.13));
@@ -289,7 +289,7 @@ fn noise3(x : vec3f) -> f32 {
              mix(mix(hash3(i + vec3f(0.,0.,1.)), hash3(i + vec3f(1.,0.,1.)), w.x),
                  mix(hash3(i + vec3f(0.,1.,1.)), hash3(i + vec3f(1.,1.,1.)), w.x), w.y), w.z);
 }
-fn tentRadius(s : f32) -> f32 { return 0.07 + 0.2 * pow(1.0 - s, 1.2); }
+fn tentRadius(s : f32) -> f32 { return 0.115 + 0.165 * pow(1.0 - s, 1.1); }
 
 // Pile that has been stroked lies down along the stroke: long streaks follow the
 // stroke direction, the isotropic fuzz flattens and the colour deepens a little.
@@ -333,11 +333,12 @@ fn bodyPat(rest : vec3f, px : f32, brush : vec4f) -> Pat {
   var col = u.bodyCol.rgb;
   var h = 0.0;
 
-  // four sewn gores, seams at +-45deg and +-135deg, faded at the poles
+  // four sewn gores meeting on the crown; the front seam stops above the face
   let gore = PI * 0.5;
-  let m = az - (round((az - PI * 0.25) / gore) * gore + PI * 0.25);
+  let m = az - round(az / gore) * gore;
   let sd = abs(m) * ce;
-  let poleFade = smoothstep(1.42, 1.15, el) * smoothstep(-1.25, -0.95, el);
+  let face = (1.0 - smoothstep(0.35, 0.55, abs(az))) * (1.0 - smoothstep(0.42, 0.62, el));
+  let poleFade = smoothstep(-1.25, -0.95, el) * (1.0 - face);
   let seam = exp(-sd * sd / (0.011 * 0.011)) * poleFade;
   let pt = clamp(sd / 0.16, 0.0, 1.0);
   let puff = 1.0 - (1.0 - pt) * (1.0 - pt);
@@ -345,9 +346,9 @@ fn bodyPat(rest : vec3f, px : f32, brush : vec4f) -> Pat {
   col *= 1.0 - 0.16 * seam;
 
   // blush
-  let bx = abs(az) - 0.6; let by = el + 0.05;
+  let bx = abs(az) - 0.5; let by = el + 0.08;
   let blush = exp(-(bx * bx / 0.011 + by * by / 0.0055)) * u.params.z;
-  col = mix(col, col * vec3f(1.05, 0.62, 0.70), 0.55 * blush);
+  col = mix(col, vec3f(0.95, 0.30, 0.36), 0.6 * blush);
 
   // embroidered smile (satin stitch) in (azimuth, elevation) space
   let hw = 0.115;
@@ -488,7 +489,7 @@ fn aces(x : vec3f) -> vec3f {
   p.h = 0.0; p.col = vec3f(0.0); p.sheen = 1.0; p.thread = 0.0;
   if (mat < 0.5) { p = bodyPat(i.rest, px, i.brush); }
   else if (mat < 1.5) { p = tentPat(i.rest, px, i.brush); }
-  else if (mat > 4.5) { p.col = vec3f(0.80, 0.50, 0.38); p.h = 0.0; p.sheen = 0.0; p.thread = 0.0; }
+  else if (mat > 4.5) { p.col = vec3f(0.92, 0.52, 0.36); p.h = 0.0; p.sheen = 0.0; p.thread = 0.0; }
   else if (mat > 3.5) { p = woodPat(i.rest, px); }
   if (u.fur.w > 0.5 && mat < 1.5) {
     // mesh view: show the procedural grid the simulation skins
@@ -500,7 +501,7 @@ fn aces(x : vec3f) -> vec3f {
     let e = max(abs(fract(g.x) - 0.5), abs(fract(g.y) - 0.5));
     p.col = mix(p.col, vec3f(0.02), smoothstep(0.44, 0.49, e) * 0.85);
   }
-  if (u.fur.x > 0.5 && mat < 1.5) { p.col *= 0.6; }
+  if (u.fur.x > 0.5 && mat < 1.5) { p.col *= 0.8; }
   let dhx = dpdx(p.h);
   let dhy = dpdy(p.h);
 
@@ -632,7 +633,11 @@ fn hash33(p : vec3f) -> vec3f {
 
   var base = u.bodyCol.rgb;
   if (v.a0.w < 0.5) {
-    o.pq = normalize(v.a2.xyz);
+    let n = normalize(v.a2.xyz);
+    o.pq = n;
+    let az = atan2(n.x, n.z); let el = asin(clamp(n.y, -1.0, 1.0));
+    let bx = abs(az) - 0.5; let by = el + 0.08;
+    base = mix(base, vec3f(0.95, 0.30, 0.36), 0.6 * exp(-(bx * bx / 0.011 + by * by / 0.0055)) * u.params.z);
   } else {
     let s = v.a2.x; let th = v.a2.y; let r = tentRadius(s);
     o.pq = vec3f(s * TENT_LEN, cos(TAU * th) * r, sin(TAU * th) * r) + vec3f(v.a2.z * 3.7);
@@ -645,30 +650,30 @@ fn hash33(p : vec3f) -> vec3f {
   let Nf = normalize(N + lean * (h * 1.2));
   let V = normalize(u.camPos.xyz - P);
   let L = u.keyDir.xyz;
-  let wrapK = clamp((dot(Nf, L) + 0.5) / 1.5, 0.0, 1.0);
+  let wrapK = clamp((dot(Nf, L) + 0.65) / 1.65, 0.0, 1.0);
   let wrapF = clamp((dot(Nf, u.fillDir.xyz) + 0.6) / 1.6, 0.0, 1.0);
   let wrapR = clamp((dot(Nf, u.rimDir.xyz) + 0.3) / 1.3, 0.0, 1.0);
-  let amb = mix(vec3f(0.95, 0.80, 0.74) * 0.30, vec3f(0.92, 0.92, 1.0) * 0.38, clamp(Nf.y * 0.5 + 0.5, 0.0, 1.0));
+  let amb = mix(vec3f(0.95, 0.84, 0.80) * 0.38, vec3f(0.94, 0.94, 1.0) * 0.48, clamp(Nf.y * 0.5 + 0.5, 0.0, 1.0));
   let light = vec3f(1.0, 0.93, 0.86) * 2.1 * wrapK * mix(0.35, 1.0, occ.x)
             + vec3f(0.78, 0.86, 1.0) * 0.55 * wrapF
             + vec3f(1.0, 0.95, 0.93) * 1.0 * wrapR
             + amb * occ.y;
-  o.col = base * light * mix(0.6, 1.0, occ.y);
+  o.col = base * light * mix(0.7, 1.0, occ.y);
   let fres = pow(1.0 - clamp(abs(dot(N, V)), 0.0, 1.0), 2.0);
   o.sheen = mix(base, vec3f(1.0, 0.96, 0.92), 0.55) * (fres * 0.9 + 0.15 * wrapK) * occ.y;
   return o;
 }
 @fragment fn fsFur(i : FurOut) -> @location(0) vec4f {
-  let q = i.pq * 118.0;
+  let q = i.pq * 150.0;
   let hv = hash33(floor(q));
   let d = length(fract(q) - (vec3f(0.2) + 0.6 * hv));
   let len = 0.55 + 0.45 * hv.z;
   let t = i.h / len;
   if (t >= 1.0) { discard; }
-  let r = 0.56 * pow(1.0 - t, 0.7);
+  let r = 0.6 * pow(1.0 - t, 0.65);
   let a = 1.0 - smoothstep(r - 0.07, r + 0.07, d);
   if (a < 0.02) { discard; }
-  var col = i.col * (0.55 + 0.45 * i.h) * (0.93 + 0.14 * hv.x) + i.sheen * i.h * i.h * 0.8;
+  var col = i.col * (0.7 + 0.3 * i.h) * (0.96 + 0.08 * hv.x) + i.sheen * i.h * i.h * 0.7;
   col = aces(col * u.params.w);
   return vec4f(pow(col, vec3f(1.0 / 2.2)), a);
 }
@@ -804,8 +809,8 @@ const H0 = RYB + 0.01;                 // rest height of the body origin
 const NS = 52, NI = 7, NB = NS + NI;   // shell + interior body particles
 const NK = 8, NT = 16;                 // tentacles x particles
 const NP = NB + NK * NT;
-const TLEN = 2.1;
-const tRad = (s) => 0.07 + 0.2 * Math.pow(1 - s, 1.2);
+const TLEN = 1.75;
+const tRad = (s) => 0.115 + 0.165 * Math.pow(1 - s, 1.1);
 const tid = (k, j) => NB + k * NT + j;
 
 const restL = new Float32Array(NP * 3);  // body-local rest positions (origin = body center)
@@ -822,8 +827,8 @@ const invM = new Float32Array(NP);
   const inner = [[0, 0, 0], [.5, 0, 0], [-.5, 0, 0], [0, .5, 0], [0, -.45, 0], [0, 0, .5], [0, 0, -.5]];
   for (let i = 0; i < NI; i++) { restL.set(bodySurf(...inner[i]), (NS + i) * 3); radius[NS + i] = 0.3; invM[NS + i] = 1; }
 
-  const curls = [205, 160, 235, 185, 245, 170, 215, 195];
-  const twists = [0.32, -0.26, 0.22, -0.36, 0.26, -0.22, 0.36, -0.3];
+  const curls = [250, 235, 260, 240, 255, 230, 265, 245];
+  const twists = [0.08, -0.06, 0.05, -0.08, 0.06, -0.05, 0.08, -0.07];
   const ds = TLEN / (NT - 1);
   for (let k = 0; k < NK; k++) {
     const phi = (k + 0.5) * Math.PI / 4;
@@ -831,7 +836,7 @@ const invM = new Float32Array(NP);
     for (let j = 0; j < NT; j++) {
       if (j > 0) {
         const s = (j - 0.5) / (NT - 1);
-        const th = (-22 * (1 - smooth(0, 0.3, s)) + curls[k] * Math.pow(smooth(0.5, 1.0, s), 1.6)) * Math.PI / 180;
+        const th = (-22 * (1 - smooth(0, 0.3, s)) + curls[k] * Math.pow(smooth(0.42, 1.0, s), 1.3)) * Math.PI / 180;
         const hd = phi + twists[k] * smooth(0.25, 1.0, s);
         x += Math.cos(th) * ds * Math.sin(hd); y += Math.sin(th) * ds; z += Math.cos(th) * ds * Math.cos(hd);
       }
@@ -956,7 +961,7 @@ function tentacleClusters(h) {
       extractRotation(_A, clQuat, qq, 2);
       quatToMat(clQuat, qq, _M);
       const s = (c + 1.5) / (NT - 1);
-      const om = lerp(46, 24, s) * Math.sqrt(stuffK), al = Math.min(1, (om * h) * (om * h));
+      const om = (lerp(46, 30, s) + 22 * smooth(0.45, 0.9, s)) * Math.sqrt(stuffK), al = Math.min(1, (om * h) * (om * h));
       for (let m = 0; m < CL; m++) {
         const i = tid(k, c + m) * 3;
         const qx = clQ[qo + m * 3], qy = clQ[qo + m * 3 + 1], qz = clQ[qo + m * 3 + 2];
@@ -992,7 +997,8 @@ function tentacleMemory(h) {
   for (let k = 0; k < NK; k++) {
     for (let j = 2; j < NT; j++) {
       const i = tid(k, j), s = j / (NT - 1);
-      const om = lerp(5.5, 2.2, s), al = (om * h) * (om * h);
+      // stuffed tips hold their curl upright: memory gets firmer towards the end of the arm
+      const om = lerp(5.5, 2.2, s) + 9 * smooth(0.45, 1.0, s), al = (om * h) * (om * h);
       const lx = swayL[i * 3], ly = swayL[i * 3 + 1], lz = swayL[i * 3 + 2];
       const gx = bodyO[0] + R[0] * lx + R[3] * ly + R[6] * lz;
       const gy = bodyO[1] + R[1] * lx + R[4] * ly + R[7] * lz;
@@ -1232,7 +1238,7 @@ function stickFrameUpdate(dt) {
   if (!stick.on) return;
   for (let i = 0; i < NP; i++) if (attachCool[i] > 0) attachCool[i] -= dt;
   // the stick is held from above and to the right; a finger reaches in from the viewer
-  const [wr, wu, wf] = stick.kind === 'finger' ? [0.2, 0.35, -0.9] : [0.5, 0.8, -0.3];
+  const [wr, wu, wf] = stick.kind === 'finger' ? [0.04, 1.0, -0.12] : [0.5, 0.8, -0.3];
   const d = [right[0] * wr + up[0] * wu + fwd[0] * wf, right[1] * wr + up[1] * wu + fwd[1] * wf, right[2] * wr + up[2] * wu + fwd[2] * wf];
   const l = Math.hypot(...d);
   stick.dir = [d[0] / l, d[1] / l, d[2] / l];
@@ -1383,10 +1389,13 @@ for (let v = 0; v < BODY_V; v++) {
   bodyNap[v * 3] = nx * ny; bodyNap[v * 3 + 1] = ny * ny - 1; bodyNap[v * 3 + 2] = nz * ny;
   const az = Math.atan2(nx, nz), el = Math.asin(clamp(ny, -1, 1));
   let eye = Infinity;
-  for (const [ea, ee] of [[-0.34, 0.12], [0.34, 0.12]]) eye = Math.min(eye, Math.hypot((az - ea) * Math.cos(el), el - ee));
+  for (const [ea, ee] of [[-0.3, 0.03], [0.3, 0.03]]) eye = Math.min(eye, Math.hypot((az - ea) * Math.cos(el), el - ee));
   const hw = 0.115, cx = clamp(az, -hw, hw), kk = cx / hw, fy = -0.045 - 0.055 * (1 - kk * kk), sl = 0.11 * cx / (hw * hw);
   const md = Math.sqrt((az - cx) ** 2 + (el - fy) ** 2 / (1 + sl * sl));
-  bodyPile[v] = Math.max(0.08, Math.min(smooth(0.1, 0.19, eye), smooth(0.018, 0.06, md)));
+  const gm = az - Math.round(az / (Math.PI / 2)) * (Math.PI / 2), sd = Math.abs(gm) * Math.cos(el);
+  const face = (1 - smooth(0.35, 0.55, Math.abs(az))) * (1 - smooth(0.42, 0.62, el));
+  const seam = 1 - 0.5 * (1 - smooth(0.006, 0.03, sd)) * smooth(-1.25, -0.95, el) * (1 - face);
+  bodyPile[v] = Math.max(0.08, Math.min(smooth(0.13, 0.22, eye), smooth(0.018, 0.06, md), seam));
 }
 const resid = new Float32Array(NS * 3);
 // stroked pile, persistent: body in body-local space, tentacles in their pattern space
@@ -1531,7 +1540,7 @@ function buildTentacle(k) {
 }
 
 // ---- glossy safety eyes, seated on the deformed body surface
-const EYES = [[-0.34, 0.12], [0.34, 0.12]];
+const EYES = [[-0.3, 0.03], [0.3, 0.03]];
 let blink = 0, blinkT = 0, nextBlink = 2.5, happy = 0;
 function sampleBody(az, el, out) {
   const fi = (Math.PI / 2 - el) / Math.PI * LAT, fj = (az + Math.PI) / (2 * Math.PI) * LON;
@@ -1545,7 +1554,7 @@ function sampleBody(az, el, out) {
 const _s = new Float32Array(6);
 function buildEyes() {
   const shut = Math.max(blink, smooth(0.05, 1, happy) * 0.72);
-  const ERX = 0.118, ERY = 0.118 * (1 - 0.93 * shut), EDZ = 0.082 * (1 - 0.55 * shut), INSET = 0.028, AMAX = 1.72;
+  const ERX = 0.15, ERY = 0.15 * (1 - 0.93 * shut), EDZ = 0.1 * (1 - 0.55 * shut), INSET = 0.03, AMAX = 1.72;
   for (let e = 0; e < 2; e++) {
     sampleBody(EYES[e][0], EYES[e][1], _s);
     const Nx = _s[3], Ny = _s[4], Nz = _s[5];
@@ -1854,7 +1863,7 @@ canvas.addEventListener('pointerdown', (e) => {
     const T = hit.hit, rd = rayFrom(e.clientX, e.clientY).d;
     fingerId = e.pointerId;
     fingerPlane = [fwd[0], fwd[1], fwd[2], -(fwd[0] * T[0] + fwd[1] * T[1] + fwd[2] * T[2])];
-    Object.assign(stick, { on: true, kind: 'finger', L: 0.9, r: 0.085 });
+    Object.assign(stick, { on: true, kind: 'finger', L: 4.5, r: 0.08 });
     stick.tipT = [T[0] + rd[0] * 0.05, T[1] + rd[1] * 0.05, T[2] + rd[2] * 0.05];
     stick.tip = stick.tipT.slice(); stick.prevTip = stick.tip.slice();
     attached.clear();
@@ -1923,9 +1932,9 @@ canvas.addEventListener('wheel', (e) => { e.preventDefault(); cam.tDist *= Math.
 //  UI
 // =====================================================================
 const PALETTES = {
-  coral:  { body: [0.92, 0.26, 0.17], under: [1.0, 0.86, 0.78], blush: 1 },
-  lilac:  { body: [0.42, 0.30, 0.70], under: [0.93, 0.90, 1.0], blush: 0.8 },
-  lagoon: { body: [0.075, 0.29, 0.29], under: [0.93, 0.94, 0.91], blush: 0.55 },
+  coral:  { body: [0.90, 0.20, 0.12], under: [1.0, 0.62, 0.48], blush: 0.7 },
+  lilac:  { body: [0.40, 0.27, 0.78], under: [0.80, 0.72, 1.0], blush: 1 },
+  lagoon: { body: [0.075, 0.33, 0.31], under: [0.70, 0.92, 0.84], blush: 0.9 },
 };
 let palette = PALETTES.lagoon;
 const target = { body: palette.body.slice(), under: palette.under.slice() };
