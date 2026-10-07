@@ -51,6 +51,14 @@
          background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; cursor: pointer; }
   .btn:hover { border-color: var(--ink); }
   .sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+  .tools { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; gap: 2px; }
+  .tool { font: inherit; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+          background: transparent; border: 0; border-radius: 999px; padding: 6px 12px; cursor: pointer; }
+  .tool:hover { color: var(--ink); }
+  .tool[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+  .tool:focus-visible, .btn:focus-visible, .swatch:focus-visible { outline: 1.5px solid var(--accent); outline-offset: 2px; }
+  canvas.stickmode { cursor: crosshair; }
+  canvas.petmode.over { cursor: pointer; }
   #fallback { position: fixed; inset: 0; display: none; place-items: center; text-align: center; padding: 24px; }
   #fallback div { max-width: 420px; font-size: 14px; line-height: 1.6; color: var(--muted); }
   #fallback h2 { font-family: "Iowan Old Style", Palatino, Georgia, serif; font-weight: 400; font-style: italic; color: var(--ink); font-size: 28px; margin: 0 0 8px; }
@@ -75,14 +83,14 @@
     <div id="stat">&mdash;</div>
   </div>
   <footer>
-    <div class="hints">
-      <span><b>Drag</b> to pull &amp; stretch</span>
-      <span><b>Flick</b> to throw</span>
-      <span><b>Tap</b> to squish</span>
-      <span><b>Drag background</b> to orbit</span>
-      <span><b>Scroll / pinch</b> to zoom</span>
-    </div>
+    <div class="hints" id="hints"></div>
     <div class="controls">
+      <div class="tools" role="group" aria-label="Tool">
+        <button class="tool" data-tool="grab" aria-pressed="true" title="Grab (1)">Grab</button>
+        <button class="tool" data-tool="pet" aria-pressed="false" title="Pet (2)">Pet</button>
+        <button class="tool" data-tool="stick" aria-pressed="false" title="Stick (3)">Stick</button>
+      </div>
+      <span class="sep"></span>
       <button class="swatch" data-c="coral" aria-label="Coral" aria-pressed="true" style="background:#ef8a74"></button>
       <button class="swatch" data-c="lilac" aria-label="Lilac" aria-pressed="false" style="background:#b9a2dc"></button>
       <button class="swatch" data-c="mint" aria-label="Mint" aria-pressed="false" style="background:#93cdb7"></button>
@@ -118,6 +126,7 @@ struct VIn {
   @location(0) a0 : vec4f,   // position, material
   @location(1) a1 : vec4f,   // normal, extra (tentacle radius)
   @location(2) a2 : vec4f,   // rest-space coordinates
+  @location(3) a3 : vec4f,   // brushed pile: direction (pattern space), amount
 };
 struct VOut {
   @builtin(position) clip : vec4f,
@@ -126,6 +135,7 @@ struct VOut {
   @location(2) nrm : vec3f,
   @location(3) ext : f32,
   @location(4) rest : vec3f,
+  @location(5) brush : vec4f,
 };
 
 @vertex fn vs(v : VIn) -> VOut {
@@ -134,6 +144,7 @@ struct VOut {
   o.wpos = v.a0.xyz; o.mat = v.a0.w;
   o.nrm = v.a1.xyz; o.ext = v.a1.w;
   o.rest = v.a2.xyz;
+  o.brush = v.a3;
   return o;
 }
 
@@ -156,6 +167,26 @@ fn noise3(x : vec3f) -> f32 {
 }
 fn tentRadius(s : f32) -> f32 { return 0.052 + 0.17 * pow(1.0 - s, 1.1); }
 
+// Pile that has been stroked lies down along the stroke: long streaks follow the
+// stroke direction, the isotropic fuzz flattens and the colour deepens a little.
+struct Brushed { h : f32, dark : f32, flat : f32 };
+fn brushed(p : vec3f, brush : vec4f, px : f32) -> Brushed {
+  var o : Brushed;
+  o.h = 0.0; o.dark = 1.0; o.flat = 1.0;
+  let a = clamp(brush.w, 0.0, 1.0);
+  if (a < 0.002) { return o; }
+  let D = normalize(brush.xyz + vec3f(1e-6, 0.0, 0.0));
+  let q = p * 95.0;
+  let q2 = q - D * dot(q, D) * 0.94;
+  let fa = 1.0 - smoothstep(0.25, 0.9, px * 95.0);
+  let s1 = noise3(q2) - 0.5;
+  let s2 = noise3(q2 * 2.3 + vec3f(3.1)) - 0.5;
+  o.h = (s1 * 0.0045 + s2 * 0.0018) * a * fa;
+  o.dark = 1.0 - (0.15 + 0.08 * s1) * a;
+  o.flat = 1.0 - 0.65 * a;
+  return o;
+}
+
 struct Pat { h : f32, col : vec3f, sheen : f32, thread : f32 };
 
 // fine minky pile: two octaves of value noise, faded out when smaller than a pixel
@@ -167,7 +198,7 @@ fn fuzz(p : vec3f, px : f32) -> vec2f {
   return vec2f(n1 * 0.0016 * a1 + n2 * 0.0007 * a2, n1 * a1 * 0.6 + n2 * a2);
 }
 
-fn bodyPat(rest : vec3f, px : f32) -> Pat {
+fn bodyPat(rest : vec3f, px : f32, brush : vec4f) -> Pat {
   var o : Pat;
   let n = normalize(rest);
   let az = atan2(n.x, n.z);
@@ -211,15 +242,17 @@ fn bodyPat(rest : vec3f, px : f32) -> Pat {
   // stitch holes around the thread
   col *= 1.0 - 0.15 * (1.0 - smoothstep(0.0, 0.006, abs(dist - w))) * step(dist, w * 1.6);
 
-  let f = fuzz(n * 1.0, px);
-  h += f.x * (1.0 - inside);
+  let br = brushed(n, brush, px);
+  let f = fuzz(n * 1.0, px) * br.flat;
+  h += (f.x + br.h) * (1.0 - inside);
   col *= 1.0 + f.y * 0.07;
+  col *= mix(1.0, br.dark, 1.0 - inside);
 
-  o.h = h; o.col = col; o.sheen = 1.0 - inside; o.thread = inside;
+  o.h = h; o.col = col; o.sheen = (1.0 - inside) * (1.0 - 0.3 * brush.w); o.thread = inside;
   return o;
 }
 
-fn tentPat(rest : vec3f, px : f32) -> Pat {
+fn tentPat(rest : vec3f, px : f32, brush : vec4f) -> Pat {
   var o : Pat;
   let s = clamp(rest.x, 0.0, 1.0);
   let th = rest.y;
@@ -251,10 +284,23 @@ fn tentPat(rest : vec3f, px : f32) -> Pat {
   col *= 1.0 - 0.18 * disc * (1.0 - smoothstep(0.0, rs * 0.12, abs(d - rs * 0.9)));
 
   let p = vec3f(s * TENT_LEN, cos(TAU * th) * r, sin(TAU * th) * r) + vec3f(rest.z * 3.7);
-  let f = fuzz(p, px);
-  h += f.x;
-  col *= 1.0 + f.y * 0.07;
-  o.h = h; o.col = col; o.sheen = 1.0; o.thread = 0.0;
+  let br = brushed(p, brush, px);
+  let f = fuzz(p, px) * br.flat;
+  h += f.x + br.h;
+  col *= (1.0 + f.y * 0.07) * br.dark;
+  o.h = h; o.col = col; o.sheen = 1.0 - 0.3 * brush.w; o.thread = 0.0;
+  return o;
+}
+
+fn woodPat(rest : vec3f, px : f32) -> Pat {
+  var o : Pat;
+  let x = rest.x;
+  let streak = noise3(vec3f(x * 2.5, rest.y * 26.0, rest.z * 26.0));
+  let fa = 1.0 - smoothstep(0.25, 0.9, px * 90.0);
+  let fine = mix(0.5, noise3(vec3f(x * 7.0, rest.y * 90.0, rest.z * 90.0)), fa);
+  o.col = mix(vec3f(0.36, 0.19, 0.085), vec3f(0.62, 0.38, 0.19), streak * 0.65 + fine * 0.35);
+  o.h = (fine - 0.5) * 0.0007;
+  o.sheen = 0.0; o.thread = 0.0;
   return o;
 }
 
@@ -319,8 +365,9 @@ fn aces(x : vec3f) -> vec3f {
   let px = max(length(sx), length(sy));
   var p : Pat;
   p.h = 0.0; p.col = vec3f(0.0); p.sheen = 1.0; p.thread = 0.0;
-  if (mat < 0.5) { p = bodyPat(i.rest, px); }
-  else if (mat < 1.5) { p = tentPat(i.rest, px); }
+  if (mat < 0.5) { p = bodyPat(i.rest, px, i.brush); }
+  else if (mat < 1.5) { p = tentPat(i.rest, px, i.brush); }
+  else if (mat > 3.5) { p = woodPat(i.rest, px); }
   let dhx = dpdx(p.h);
   let dhy = dpdy(p.h);
 
@@ -329,7 +376,7 @@ fn aces(x : vec3f) -> vec3f {
   let L = u.keyDir.xyz;
 
   // ---------------------------------------------------------------- floor
-  if (mat > 2.5) {
+  if (mat > 2.5 && mat < 3.5) {
     var vis = 1.0; var ao = 1.0;
     for (var s = 0u; s < nsph; s++) {
       let sp = u.spheres[s];
@@ -390,7 +437,7 @@ fn aces(x : vec3f) -> vec3f {
     let nv = clamp(dot(N, V), 0.0, 1.0);
     col += pow(1.0 - nv, 3.0) * sheenC * 0.35 * ao * p.sheen;
     col *= mix(0.55, 1.0, ao);
-  } else {
+  } else if (mat < 2.5) {
     // ---------------------------------------------------------------- glossy safety eye
     let r = length(i.rest.xy);
     let iris = vec3f(0.06, 0.028, 0.018);
@@ -407,6 +454,18 @@ fn aces(x : vec3f) -> vec3f {
     let a2 = 0.004;
     let dd = nh * nh * (a2 - 1.0) + 1.0;
     col += keyC * vis * F * a2 / (PI * dd * dd) * max(dot(N, L), 0.0) * 0.25;
+  } else {
+    // ---------------------------------------------------------------- waxed wooden stick
+    let base = p.col;
+    let nl = max(dot(N, L), 0.0);
+    col = base * (keyC * vis * (nl * 0.85 + 0.15) + fillC * max(dot(N, u.fillDir.xyz), 0.0) + amb * ao);
+    let H = normalize(L + V);
+    let nh = max(dot(N, H), 0.0);
+    let aw = 0.05;
+    let dw = nh * nh * (aw - 1.0) + 1.0;
+    let Fw = 0.04 + 0.96 * pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 5.0);
+    col += keyC * vis * nl * Fw * aw / (PI * dw * dw) * 0.6;
+    col += envColor(reflect(-V, N)) * Fw * 0.3;
   }
 
   col = aces(col * u.params.w);
@@ -438,10 +497,11 @@ const pipeline = device.createRenderPipeline({
   layout: 'auto',
   vertex: {
     module, entryPoint: 'vs',
-    buffers: [{ arrayStride: 48, attributes: [
+    buffers: [{ arrayStride: 64, attributes: [
       { shaderLocation: 0, offset: 0, format: 'float32x4' },
       { shaderLocation: 1, offset: 16, format: 'float32x4' },
       { shaderLocation: 2, offset: 32, format: 'float32x4' },
+      { shaderLocation: 3, offset: 48, format: 'float32x4' },
     ] }],
   },
   fragment: { module, entryPoint: 'fs', targets: [{ format }] },
@@ -599,6 +659,7 @@ function resetSim(drop = 1.3) {
     pos[i * 3] = x * ca - y * sa; pos[i * 3 + 1] = x * sa + y * ca + H0 + drop; pos[i * 3 + 2] = z;
   }
   prev.set(pos); vel.fill(0);
+  attached.clear(); attachCool.fill(0);
   bodyQuat.set([0, 0, Math.sin(a / 2), Math.cos(a / 2)]);
   for (let n = 0; n < NK * NC; n++) clQuat.set([0, 0, Math.sin(a / 2), Math.cos(a / 2)], n * 4);
   quatToMat(bodyQuat, 0, bodyR);
@@ -825,6 +886,102 @@ function updateSway(t) {
   }
 }
 
+// ---------------------------------------------------------------- the stick
+// A kinematic wooden capsule. It shoves the plush around, and any tentacle that
+// touches it clings on (wrapping around it) until it is yanked off hard enough.
+const stick = { on: false, tip: [0, 0, 0], prevTip: [0, 0, 0], tipT: [0, 0, 0], dir: [0, 1, 0] };
+const attached = new Map();           // particle -> { u, phi }
+const attachCool = new Float32Array(NP);
+const attachCount = new Int32Array(NK);
+const _e1 = [0, 0, 0], _e2 = [0, 0, 0];
+function stickFrame(a) {
+  let x = a[2], y = 0, z = -a[0];
+  let l = Math.hypot(x, y, z);
+  if (l < 1e-4) { x = 0; y = -a[2]; z = a[1]; l = Math.hypot(x, y, z); }
+  _e1[0] = x / l; _e1[1] = y / l; _e1[2] = z / l;
+  _e2[0] = a[1] * _e1[2] - a[2] * _e1[1]; _e2[1] = a[2] * _e1[0] - a[0] * _e1[2]; _e2[2] = a[0] * _e1[1] - a[1] * _e1[0];
+}
+function stickConstraints(f) {
+  const a = stick.dir, L = STICK_L, rs = STICK_R;
+  const Ax = lerp(stick.prevTip[0], stick.tip[0], f), Ay = lerp(stick.prevTip[1], stick.tip[1], f), Az = lerp(stick.prevTip[2], stick.tip[2], f);
+  stickFrame(a);
+  // 1) body: push the ellipsoid off the deepest point of the stick, denting it locally
+  const R = bodyR;
+  let best = 0, tx = 0, ty = 0, tz = 0, cx = 0, cy = 0, cz = 0;
+  for (let n = 0; n <= 16; n++) {
+    const u = (n / 16) * L;
+    const x = Ax + a[0] * u - bodyO[0], y = Ay + a[1] * u - bodyO[1], z = Az + a[2] * u - bodyO[2];
+    const lx = R[0] * x + R[1] * y + R[2] * z, ly = R[3] * x + R[4] * y + R[5] * z, lz = R[6] * x + R[7] * y + R[8] * z;
+    const ax = RX * 0.97 + rs, ay = (ly > 0 ? RYT : RYB) * 0.97 + rs, az = RZ * 0.97 + rs;
+    const e2 = (lx / ax) ** 2 + (ly / ay) ** 2 + (lz / az) ** 2;
+    if (e2 >= 1 || e2 < 1e-8) continue;
+    const k = 1 - 1 / Math.sqrt(e2);              // l - surface, as a fraction of l
+    const ox = lx * k, oy = ly * k, oz = lz * k, pen = Math.hypot(ox, oy, oz);
+    if (pen > best) {
+      best = pen;
+      tx = R[0] * ox + R[3] * oy + R[6] * oz; ty = R[1] * ox + R[4] * oy + R[7] * oz; tz = R[2] * ox + R[5] * oy + R[8] * oz;
+      cx = x + bodyO[0]; cy = y + bodyO[1]; cz = z + bodyO[2];
+    }
+  }
+  if (best > 0) {
+    for (let i = 0; i < NB; i++) {
+      const d = Math.hypot(pos[i * 3] - cx, pos[i * 3 + 1] - cy, pos[i * 3 + 2] - cz);
+      const w = 0.32 + 0.68 * Math.max(0, 1 - d / 0.75);
+      pos[i * 3] += tx * w; pos[i * 3 + 1] += ty * w; pos[i * 3 + 2] += tz * w;
+    }
+  }
+  // 2) tentacles: collide, and cling on contact
+  attachCount.fill(0);
+  for (const i of attached.keys()) attachCount[((i - NB) / NT) | 0]++;
+  for (let i = NB; i < NP; i++) {
+    const j = (i - NB) % NT, k = ((i - NB) / NT) | 0;
+    if (j < 2) continue;
+    const o = i * 3;
+    const px = pos[o] - Ax, py = pos[o + 1] - Ay, pz = pos[o + 2] - Az;
+    const t = clamp((px * a[0] + py * a[1] + pz * a[2]) / L, 0, 1);
+    const dx = px - a[0] * t * L, dy = py - a[1] * t * L, dz = pz - a[2] * t * L;
+    const d = Math.hypot(dx, dy, dz) || 1e-6;
+    const at = attached.get(i);
+    if (at) {
+      const c = Math.cos(at.phi), sn = Math.sin(at.phi), rr = rs + radius[i] * 0.8;
+      const gx = Ax + a[0] * at.u * L + (_e1[0] * c + _e2[0] * sn) * rr;
+      const gy = Ay + a[1] * at.u * L + (_e1[1] * c + _e2[1] * sn) * rr;
+      const gz = Az + a[2] * at.u * L + (_e1[2] * c + _e2[2] * sn) * rr;
+      const ex = gx - pos[o], ey = gy - pos[o + 1], ez = gz - pos[o + 2];
+      if (Math.hypot(ex, ey, ez) > 0.42) { attached.delete(i); attachCool[i] = 0.9; continue; }
+      pos[o] += ex * 0.6; pos[o + 1] += ey * 0.6; pos[o + 2] += ez * 0.6;
+      continue;
+    }
+    const md = rs + radius[i] * 0.95;
+    if (d < md) {
+      const m = md / d;
+      pos[o] = Ax + a[0] * t * L + dx * m; pos[o + 1] = Ay + a[1] * t * L + dy * m; pos[o + 2] = Az + a[2] * t * L + dz * m;
+      if (j >= 4 && attachCool[i] <= 0 && attachCount[k] < 6 && t > 0.02 && t < 0.98) {
+        attached.set(i, { u: t, phi: Math.atan2(dx * _e2[0] + dy * _e2[1] + dz * _e2[2], dx * _e1[0] + dy * _e1[1] + dz * _e1[2]) });
+        attachCount[k]++;
+        happy = Math.min(1, happy + 0.25);
+      }
+    } else if (attachCount[k] > 0 && d < md + 0.45) {
+      // a tentacle that holds on curls the rest of itself around the stick
+      const w = 0.02 * (1 - (d - md) / 0.45), m = md / d;
+      pos[o] += (Ax + a[0] * t * L + dx * m - pos[o]) * w;
+      pos[o + 1] += (Ay + a[1] * t * L + dy * m - pos[o + 1]) * w;
+      pos[o + 2] += (Az + a[2] * t * L + dz * m - pos[o + 2]) * w;
+    }
+  }
+}
+function stickFrameUpdate(dt) {
+  stick.prevTip = stick.tip.slice();
+  if (!stick.on) return;
+  for (let i = 0; i < NP; i++) if (attachCool[i] > 0) attachCool[i] -= dt;
+  const d = [right[0] * 0.5 + up[0] * 0.8 - fwd[0] * 0.3, right[1] * 0.5 + up[1] * 0.8 - fwd[1] * 0.3, right[2] * 0.5 + up[2] * 0.8 - fwd[2] * 0.3];
+  const l = Math.hypot(...d);
+  stick.dir = [d[0] / l, d[1] / l, d[2] / l];
+  const k = 1 - Math.exp(-28 * dt);
+  for (let c = 0; c < 3; c++) stick.tip[c] = lerp(stick.tip[c], stick.tipT[c], k);
+  stick.tip[1] = Math.max(stick.tip[1], STICK_R + 0.01);
+}
+
 const SUB = 10;
 const bscale = [1, 1, 1];
 function step(dt, t) {
@@ -846,6 +1003,7 @@ function step(dt, t) {
     tentacleDistances(h);
     tentacleMemory(h);
     collisions();
+    if (stick.on) stickConstraints((s + 1) / SUB);
     applyGrabs((s + 1) / SUB);
     floorAndBounds();
     const ih = 1 / h;
@@ -874,8 +1032,11 @@ const TS = (NT - 1) * SEG + 1, TR = TS + CAP;
 const TENT_V = TR * (RING + 1);
 const EL = 12, EB = 24;
 const EYE_V = (EL + 1) * (EB + 1);
-const TOTAL_V = BODY_V + NK * TENT_V + 2 * EYE_V;
-const FPV = 12;
+const STICK_L = 2.6, STICK_R = 0.055, STICK_SEG = 16, STICK_RINGS = 14;
+const STICK_V = STICK_RINGS * (STICK_SEG + 1);
+const STICK_BASE = BODY_V + NK * TENT_V + 2 * EYE_V;
+const TOTAL_V = STICK_BASE + STICK_V;
+const FPV = 16;
 const vdata = new Float32Array(TOTAL_V * FPV);
 
 const indices = [];
@@ -888,6 +1049,8 @@ const grid = (base, rows, cols) => {
 grid(0, LAT, LON);
 for (let k = 0; k < NK; k++) grid(BODY_V + k * TENT_V, TR - 1, RING);
 for (let e = 0; e < 2; e++) grid(BODY_V + NK * TENT_V + e * EYE_V, EL, EB);
+const PLUSH_INDICES = indices.length;
+grid(STICK_BASE, STICK_RINGS - 1, STICK_SEG);
 const indexData = new Uint32Array(indices);
 
 const vbuf = device.createBuffer({ size: vdata.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
@@ -896,10 +1059,10 @@ device.queue.writeBuffer(ibuf, 0, indexData);
 
 const F = 40;
 const floorV = new Float32Array([
-  -F, 0, -F, 3, 0, 1, 0, 0, 0, 0, 0, 0,
-   F, 0, -F, 3, 0, 1, 0, 0, 0, 0, 0, 0,
-  -F, 0,  F, 3, 0, 1, 0, 0, 0, 0, 0, 0,
-   F, 0,  F, 3, 0, 1, 0, 0, 0, 0, 0, 0,
+  -F, 0, -F, 3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+   F, 0, -F, 3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  -F, 0,  F, 3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+   F, 0,  F, 3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ]);
 const floorI = new Uint32Array([0, 2, 1, 1, 2, 3]);
 const fvbuf = device.createBuffer({ size: floorV.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
@@ -936,6 +1099,10 @@ const skinW = new Float32Array(BODY_V * SK);
   }
 }
 const resid = new Float32Array(NS * 3);
+// stroked pile, persistent: body in body-local space, tentacles in their pattern space
+const bodyBrush = new Float32Array(BODY_V * 4);
+const tentBrush = new Float32Array(NK * TENT_V * 4);
+const tFrame = new Float32Array(NK * TR * 9);
 const bodyP = new Float32Array(BODY_V * 3);
 const bodyN = new Float32Array(BODY_V * 3);
 
@@ -987,6 +1154,7 @@ function buildBody() {
     vdata[o] = bodyP[v * 3]; vdata[o + 1] = bodyP[v * 3 + 1]; vdata[o + 2] = bodyP[v * 3 + 2]; vdata[o + 3] = 0;
     vdata[o + 4] = bodyN[v * 3]; vdata[o + 5] = bodyN[v * 3 + 1]; vdata[o + 6] = bodyN[v * 3 + 2]; vdata[o + 7] = 0;
     vdata[o + 8] = bodyDir[v * 3]; vdata[o + 9] = bodyDir[v * 3 + 1]; vdata[o + 10] = bodyDir[v * 3 + 2]; vdata[o + 11] = 0;
+    vdata[o + 12] = bodyBrush[v * 4]; vdata[o + 13] = bodyBrush[v * 4 + 1]; vdata[o + 14] = bodyBrush[v * 4 + 2]; vdata[o + 15] = bodyBrush[v * 4 + 3];
   }
 }
 
@@ -1025,6 +1193,7 @@ function buildTentacle(k) {
   }
   const writeRing = (r, cx, cy, cz, tx, ty, tz, rad, s, capA) => {
     const bx = ty * nz - tz * ny, by = tz * nx - tx * nz, bz = tx * ny - ty * nx;
+    tFrame.set([tx, ty, tz, nx, ny, nz, bx, by, bz], (k * TR + r) * 9);
     const ca = Math.cos(capA), sa = Math.sin(capA);
     for (let q = 0; q <= RING; q++) {
       const th = q / RING, an = th * Math.PI * 2, c = Math.cos(an), sn = Math.sin(an);
@@ -1033,6 +1202,8 @@ function buildTentacle(k) {
       vdata[o] = cx + rx * rad; vdata[o + 1] = Math.max(cy + ry * rad, 0.003); vdata[o + 2] = cz + rz * rad; vdata[o + 3] = 1;
       vdata[o + 4] = rx * ca + tx * sa; vdata[o + 5] = ry * ca + ty * sa; vdata[o + 6] = rz * ca + tz * sa; vdata[o + 7] = rad;
       vdata[o + 8] = s; vdata[o + 9] = th; vdata[o + 10] = k; vdata[o + 11] = 0;
+      const bo = (k * TENT_V + r * (RING + 1) + q) * 4;
+      vdata[o + 12] = tentBrush[bo]; vdata[o + 13] = tentBrush[bo + 1]; vdata[o + 14] = tentBrush[bo + 2]; vdata[o + 15] = tentBrush[bo + 3];
     }
   };
   for (let m = 0; m < TS; m++) {
@@ -1054,7 +1225,7 @@ function buildTentacle(k) {
 
 // ---- glossy safety eyes, seated on the deformed body surface
 const EYES = [[-0.34, 0.12], [0.34, 0.12]];
-let blink = 0, blinkT = 0, nextBlink = 2.5;
+let blink = 0, blinkT = 0, nextBlink = 2.5, happy = 0;
 function sampleBody(az, el, out) {
   const fi = (Math.PI / 2 - el) / Math.PI * LAT, fj = (az + Math.PI) / (2 * Math.PI) * LON;
   const i0 = Math.floor(fi), j0 = Math.floor(fj), di = fi - i0, dj = fj - j0;
@@ -1066,7 +1237,8 @@ function sampleBody(az, el, out) {
 }
 const _s = new Float32Array(6);
 function buildEyes() {
-  const ERX = 0.118, ERY = 0.118 * (1 - 0.93 * blink), EDZ = 0.082 * (1 - 0.55 * blink), INSET = 0.028, AMAX = 1.72;
+  const shut = Math.max(blink, smooth(0.05, 1, happy) * 0.72);
+  const ERX = 0.118, ERY = 0.118 * (1 - 0.93 * shut), EDZ = 0.082 * (1 - 0.55 * shut), INSET = 0.028, AMAX = 1.72;
   for (let e = 0; e < 2; e++) {
     sampleBody(EYES[e][0], EYES[e][1], _s);
     const Nx = _s[3], Ny = _s[4], Nz = _s[5];
@@ -1093,6 +1265,26 @@ function buildEyes() {
         vdata[o + 7] = 0;
         vdata[o + 8] = sa * cb; vdata[o + 9] = sa * sb; vdata[o + 10] = ca; vdata[o + 11] = 0;
       }
+    }
+  }
+}
+
+function buildStick() {
+  if (!stick.on) return;
+  const a = stick.dir, A = stick.tip, rs = STICK_R, L = STICK_L;
+  stickFrame(a);
+  for (let r = 0; r < STICK_RINGS; r++) {
+    const half = STICK_RINGS / 2;
+    const ang = r < half ? -Math.PI / 2 + (r / (half - 1)) * Math.PI / 2 : ((r - half) / (half - 1)) * Math.PI / 2;
+    const x = r < half ? rs + rs * Math.sin(ang) : L - rs + rs * Math.sin(ang);
+    const rad = rs * Math.cos(ang), ca = Math.cos(ang), sa = Math.sin(ang);
+    for (let q = 0; q <= STICK_SEG; q++) {
+      const th = (q / STICK_SEG) * Math.PI * 2, c = Math.cos(th), sn = Math.sin(th);
+      const rx = _e1[0] * c + _e2[0] * sn, ry = _e1[1] * c + _e2[1] * sn, rz = _e1[2] * c + _e2[2] * sn;
+      const o = (STICK_BASE + r * (STICK_SEG + 1) + q) * FPV;
+      vdata[o] = A[0] + a[0] * x + rx * rad; vdata[o + 1] = A[1] + a[1] * x + ry * rad; vdata[o + 2] = A[2] + a[2] * x + rz * rad; vdata[o + 3] = 4;
+      vdata[o + 4] = rx * ca + a[0] * sa; vdata[o + 5] = ry * ca + a[1] * sa; vdata[o + 6] = rz * ca + a[2] * sa; vdata[o + 7] = 0;
+      vdata[o + 8] = x; vdata[o + 9] = c; vdata[o + 10] = sn; vdata[o + 11] = 0;
     }
   }
 }
@@ -1231,10 +1423,102 @@ function boop(hit, dir) {
   blinkT = 0.0001; nextBlink = 3 + Math.random() * 3;
 }
 
+// ---------------------------------------------------------------- petting
+const pets = new Map(); // pointerId -> { last, kind, k }
+function blendBrush(arr, o, dx, dy, dz, w) {
+  const a = arr[o + 3];
+  let x = arr[o] * a * (1 - w) + dx * w, y = arr[o + 1] * a * (1 - w) + dy * w, z = arr[o + 2] * a * (1 - w) + dz * w;
+  const l = Math.hypot(x, y, z);
+  if (l < 1e-6) return;
+  arr[o] = x / l; arr[o + 1] = y / l; arr[o + 2] = z / l;
+  arr[o + 3] = Math.min(1, a + w * 0.9);
+}
+function stroke(from, hit) {
+  const hp = hit.hit;
+  let dx = hp[0] - from[0], dy = hp[1] - from[1], dz = hp[2] - from[2];
+  const len = Math.hypot(dx, dy, dz);
+  if (len < 0.004) return false;
+  dx /= len; dy /= len; dz /= len;
+  const strength = Math.min(1, len / 0.05) * 0.55;
+  const R = bodyR;
+  if (hit.kind === 'body') {
+    const lx = R[0] * dx + R[1] * dy + R[2] * dz, ly = R[3] * dx + R[4] * dy + R[5] * dz, lz = R[6] * dx + R[7] * dy + R[8] * dz;
+    const RAD = 0.3;
+    for (let v = 0; v < BODY_V; v++) {
+      const d = Math.hypot(bodyP[v * 3] - hp[0], bodyP[v * 3 + 1] - hp[1], bodyP[v * 3 + 2] - hp[2]);
+      if (d >= RAD) continue;
+      const nx = bodyDir[v * 3], ny = bodyDir[v * 3 + 1], nz = bodyDir[v * 3 + 2], dn = lx * nx + ly * ny + lz * nz;
+      blendBrush(bodyBrush, v * 4, lx - nx * dn, ly - ny * dn, lz - nz * dn, (1 - d / RAD) ** 2 * strength);
+    }
+    const ix = hp[0] - bodyO[0], iy = hp[1] - bodyO[1], iz = hp[2] - bodyO[2], il = Math.hypot(ix, iy, iz) || 1;
+    for (let i = 0; i < NS; i++) {
+      const d = Math.hypot(pos[i * 3] - hp[0], pos[i * 3 + 1] - hp[1], pos[i * 3 + 2] - hp[2]);
+      const f = Math.max(0, 1 - d / 0.6) * strength;
+      vel[i * 3] += (dx * 1.1 - ix / il * 0.6) * f; vel[i * 3 + 1] += (dy * 1.1 - iy / il * 0.6) * f; vel[i * 3 + 2] += (dz * 1.1 - iz / il * 0.6) * f;
+    }
+  } else {
+    const k = hit.k, RAD = 0.2;
+    for (let r = 0; r < TR; r++) {
+      const fo = (k * TR + r) * 9;
+      for (let q = 0; q <= RING; q++) {
+        const vo = (BODY_V + k * TENT_V + r * (RING + 1) + q) * FPV;
+        const d = Math.hypot(vdata[vo] - hp[0], vdata[vo + 1] - hp[1], vdata[vo + 2] - hp[2]);
+        if (d >= RAD) continue;
+        const an = (q / RING) * Math.PI * 2, c = Math.cos(an), sn = Math.sin(an);
+        const ax = -sn * tFrame[fo + 3] + c * tFrame[fo + 6], ay = -sn * tFrame[fo + 4] + c * tFrame[fo + 7], az = -sn * tFrame[fo + 5] + c * tFrame[fo + 8];
+        const da = dx * tFrame[fo] + dy * tFrame[fo + 1] + dz * tFrame[fo + 2], dr = dx * ax + dy * ay + dz * az;
+        blendBrush(tentBrush, (k * TENT_V + r * (RING + 1) + q) * 4, da, -dr * sn, dr * c, (1 - d / RAD) ** 2 * strength);
+      }
+    }
+    for (let j = 2; j < NT; j++) {
+      const i = tid(k, j), d = Math.hypot(pos[i * 3] - hp[0], pos[i * 3 + 1] - hp[1], pos[i * 3 + 2] - hp[2]);
+      const f = Math.max(0, 1 - d / 0.4) * strength;
+      vel[i * 3] += dx * 1.6 * f; vel[i * 3 + 1] += (dy * 1.6 - 0.4) * f; vel[i * 3 + 2] += dz * 1.6 * f;
+    }
+  }
+  happy = Math.min(1, happy + len * 1.4);
+  return true;
+}
+
+// ---------------------------------------------------------------- stick steering
+function aimStick(cx, cy) {
+  const ray = rayFrom(cx, cy);
+  const P0 = [bodyO[0] - fwd[0] * 0.2, bodyO[1] - fwd[1] * 0.2, bodyO[2] - fwd[2] * 0.2];
+  const den = fwd[0] * ray.d[0] + fwd[1] * ray.d[1] + fwd[2] * ray.d[2];
+  if (Math.abs(den) < 1e-4) return;
+  const t = ((P0[0] - ray.o[0]) * fwd[0] + (P0[1] - ray.o[1]) * fwd[1] + (P0[2] - ray.o[2]) * fwd[2]) / den;
+  if (t <= 0) return;
+  stick.tipT = [clamp(ray.o[0] + ray.d[0] * t, -3.8, 3.8), clamp(ray.o[1] + ray.d[1] * t, STICK_R + 0.01, 5), clamp(ray.o[2] + ray.d[2] * t, -3.8, 3.8)];
+}
+
+let tool = 'grab';
+const HINTS = {
+  grab: ['<b>Drag</b> to pull &amp; stretch', '<b>Flick</b> to throw', '<b>Tap</b> to squish', '<b>Drag background</b> to orbit', '<b>Scroll / pinch</b> to zoom'],
+  pet: ['<b>Stroke</b> the fur to brush it', 'Brushed pile lies down and turns a shade darker', '<b>Drag background</b> to orbit', '<b>Reset</b> combs it smooth'],
+  stick: ['<b>Move</b> to steer the stick', '<b>Poke</b> to push the plush', 'Tentacles <b>cling</b> on contact', '<b>Shake hard</b> to make it let go'],
+};
+function setTool(t) {
+  tool = t;
+  document.querySelectorAll('.tool').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === t)));
+  document.getElementById('hints').innerHTML = HINTS[t].map((h) => `<span>${h}</span>`).join('');
+  canvas.classList.toggle('stickmode', t === 'stick');
+  canvas.classList.toggle('petmode', t === 'pet');
+  grabs.clear(); pets.clear();
+  if (t === 'stick' && !stick.on) {
+    stick.on = true;
+    stick.tipT = [bodyO[0] + right[0] * 2.1, Math.max(1.2, bodyO[1] + 0.5), bodyO[2] + right[2] * 2.1];
+    stick.tip = stick.tipT.slice(); stick.prevTip = stick.tip.slice();
+  } else if (t !== 'stick') { stick.on = false; attached.clear(); }
+}
+document.querySelectorAll('.tool').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
+window.addEventListener('keydown', (e) => { const t = { 1: 'grab', 2: 'pet', 3: 'stick' }[e.key]; if (t && !e.metaKey && !e.ctrlKey) setTool(t); });
+
 canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now() });
+  if (tool === 'stick') { aimStick(e.clientX, e.clientY); return; }
   const hit = pick(rayFrom(e.clientX, e.clientY));
+  if (hit && tool === 'pet') { pets.set(e.pointerId, { last: hit.hit, kind: hit.kind, k: hit.k }); return; }
   if (hit) { startGrab(e.pointerId, hit); canvas.classList.add('grabbing'); return; }
   pinch.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (pinch.size === 1) { orbit.active = true; orbit.id = e.pointerId; orbit.x = e.clientX; orbit.y = e.clientY; orbit.lastT = performance.now(); cam.vYaw = cam.vPitch = 0; canvas.classList.add('grabbing'); }
@@ -1243,6 +1527,15 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => {
   const p = pointers.get(e.pointerId);
   if (p) { p.x = e.clientX; p.y = e.clientY; }
+  if (tool === 'stick') { if (e.pointerType === 'mouse' || p) aimStick(e.clientX, e.clientY); return; }
+  const pt = pets.get(e.pointerId);
+  if (pt) {
+    const hit = pick(rayFrom(e.clientX, e.clientY));
+    if (!hit) { pt.last = null; return; }
+    const same = pt.last && hit.kind === pt.kind && hit.k === pt.k && Math.hypot(hit.hit[0] - pt.last[0], hit.hit[1] - pt.last[1], hit.hit[2] - pt.last[2]) < 0.6;
+    if (!same || stroke(pt.last, hit) || !pt.last) { pt.last = hit.hit; pt.kind = hit.kind; pt.k = hit.k; }
+    return;
+  }
   if (grabs.has(e.pointerId)) { moveGrab(e.pointerId, e.clientX, e.clientY); return; }
   if (pinch.has(e.pointerId)) {
     pinch.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1263,6 +1556,7 @@ canvas.addEventListener('pointermove', (e) => {
 const endPointer = (e) => {
   const p = pointers.get(e.pointerId);
   pointers.delete(e.pointerId);
+  pets.delete(e.pointerId);
   const g = grabs.get(e.pointerId);
   if (g) {
     grabs.delete(e.pointerId);
@@ -1296,9 +1590,12 @@ document.querySelectorAll('.swatch').forEach((b) => b.addEventListener('click', 
 }));
 document.getElementById('reset').addEventListener('click', () => {
   resetSim(1.3);
+  bodyBrush.fill(0); tentBrush.fill(0);
+  if (stick.on) { stick.tipT = [bodyO[0] + right[0] * 2.1, 1.2, bodyO[2] + right[2] * 2.1]; }
   cam.tYaw = 0.32; cam.tPitch = 0.42; cam.tDist = 7.2; cam.vYaw = cam.vPitch = 0;
 });
 const statEl = document.getElementById('stat');
+setTool('grab');
 
 // =====================================================================
 //  Frame loop
@@ -1338,7 +1635,7 @@ function writeUniforms(t) {
   const sp = (x, y, z, r) => { u.set([x, y, z, r], 48 + n * 4); n++; };
   sp(bodyO[0], bodyO[1] + 0.05, bodyO[2], 0.9);
   for (let k2 = 0; k2 < NK; k2++) for (let j = 3; j < NT; j += 2) { const i = tid(k2, j); sp(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], radius[i] * 0.95); }
-  u.set([t, n, palette.blush, 0.46], 44);
+  u.set([t, n, palette.blush * (1 + happy * 0.9), 0.46], 44);
   device.queue.writeBuffer(uniformBuf, 0, u);
 }
 
@@ -1356,12 +1653,15 @@ function frame(now) {
   if (blinkT > 0) { blinkT += dt; const b = blinkT / 0.17; blink = b < 1 ? Math.sin(b * Math.PI) : 0; if (b >= 1) { blinkT = 0; blink = 0; } }
 
   adaptResolution((now - prevNow) / 1000); prevNow = now;
+  happy *= Math.exp(-0.9 * dt);
   ensureTargets();
+  stickFrameUpdate(dt);
   step(dt, simT);
   updateCamera(dt);
   buildBody();
   for (let k = 0; k < NK; k++) buildTentacle(k);
   buildEyes();
+  buildStick();
   device.queue.writeBuffer(vbuf, 0, vdata);
   writeUniforms(simT);
 
@@ -1374,7 +1674,7 @@ function frame(now) {
   pass.setPipeline(pipeline);
   pass.setBindGroup(0, bindGroup);
   pass.setVertexBuffer(0, fvbuf); pass.setIndexBuffer(fibuf, 'uint32'); pass.drawIndexed(6);
-  pass.setVertexBuffer(0, vbuf); pass.setIndexBuffer(ibuf, 'uint32'); pass.drawIndexed(indexData.length);
+  pass.setVertexBuffer(0, vbuf); pass.setIndexBuffer(ibuf, 'uint32'); pass.drawIndexed(stick.on ? indexData.length : PLUSH_INDICES);
   pass.end();
   device.queue.submit([enc.finish()]);
   requestAnimationFrame(frame);
