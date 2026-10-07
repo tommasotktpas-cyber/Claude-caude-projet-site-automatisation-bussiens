@@ -118,6 +118,7 @@ struct U {
   underCol : vec4f,
   bgCol    : vec4f,
   params   : vec4f,          // x time, y sphere count, z blush, w exposure
+  bound    : vec4f,          // bounding sphere of all occluders
   spheres  : array<vec4f, 64>,
 };
 @group(0) @binding(0) var<uniform> u : U;
@@ -136,17 +137,9 @@ struct VOut {
   @location(3) ext : f32,
   @location(4) rest : vec3f,
   @location(5) brush : vec4f,
+  @location(6) occ : vec2f,   // soft shadow, ambient occlusion (per vertex: both are very low frequency)
 };
 
-@vertex fn vs(v : VIn) -> VOut {
-  var o : VOut;
-  o.clip = u.viewProj * vec4f(v.a0.xyz, 1.0);
-  o.wpos = v.a0.xyz; o.mat = v.a0.w;
-  o.nrm = v.a1.xyz; o.ext = v.a1.w;
-  o.rest = v.a2.xyz;
-  o.brush = v.a3;
-  return o;
-}
 
 const PI = 3.14159265;
 const TAU = 6.2831853;
@@ -194,8 +187,9 @@ struct Pat { h : f32, col : vec3f, sheen : f32, thread : f32 };
 fn fuzz(p : vec3f, px : f32) -> vec2f {
   let a1 = 1.0 - smoothstep(0.25, 0.9, px * 60.0);
   let a2 = 1.0 - smoothstep(0.25, 0.9, px * 150.0);
-  let n1 = noise3(p * 60.0) - 0.5;
-  let n2 = noise3(p * 150.0 + 7.0) - 0.5;
+  var n1 = 0.0; var n2 = 0.0;
+  if (a1 > 0.0) { n1 = noise3(p * 60.0) - 0.5; }
+  if (a2 > 0.0) { n2 = noise3(p * 150.0 + 7.0) - 0.5; }
   return vec2f(n1 * 0.0016 * a1 + n2 * 0.0007 * a2, n1 * a1 * 0.6 + n2 * a2);
 }
 
@@ -305,22 +299,51 @@ fn woodPat(rest : vec3f, px : f32) -> Pat {
   return o;
 }
 
-fn sphSoftShadow(ro : vec3f, rd : vec3f, sph : vec4f, k : f32) -> f32 {
-  let oc = ro - sph.xyz;
-  let b = dot(oc, rd);
-  let c = dot(oc, oc) - sph.w * sph.w;
-  let h = b * b - c;
-  let d = sqrt(max(0.0, sph.w * sph.w - h)) - sph.w;
-  let t = -b - sqrt(max(h, 0.0));
-  if (t < 0.0) { return 1.0; }
-  return smoothstep(0.0, 1.0, 2.5 * k * d / t);
+// Soft shadow + ambient occlusion from the sphere proxies in a single pass.
+// Spheres outside the light's penumbra cone are skipped exactly (they would return 1),
+// and occlusion fades to zero by 8 radii, so most pixels touch only a handful of spheres.
+fn occlusion(P : vec3f, N : vec3f, L : vec3f, k : f32, aoK : f32, reach : f32, skipSelf : bool) -> vec2f {
+  var vis = 1.0; var ao = 1.0;
+  let pen = 1.0 / (2.5 * k);
+  let n = u32(u.params.y);
+  for (var s = 0u; s < n; s++) {
+    let sp = u.spheres[s];
+    let di = sp.xyz - P;
+    let l2 = dot(di, di);
+    let r2 = sp.w * sp.w;
+    if (skipSelf && l2 < r2 * 1.2544) { continue; }
+    if (l2 < r2 * reach * reach) {
+      let l = sqrt(l2);
+      let occ = clamp(dot(N, di) / l, 0.0, 1.0) * r2 / l2 * (1.0 - smoothstep(0.75 * reach * sp.w, reach * sp.w, l));
+      ao *= 1.0 - min(occ * aoK, 0.9);
+    }
+    let b = dot(di, L);
+    if (b > 0.0) {
+      let perp2 = max(l2 - b * b, 0.0);
+      let lim = sp.w + b * pen;
+      if (perp2 < lim * lim) {
+        let t = b - sqrt(max(r2 - perp2, 0.0));
+        if (t > 0.0) { vis *= smoothstep(0.0, 1.0, (sqrt(perp2) - sp.w) / (t * pen)); }
+      }
+    }
+  }
+  return vec2f(vis, ao);
 }
-fn sphOcc(p : vec3f, n : vec3f, sph : vec4f) -> f32 {
-  let di = sph.xyz - p;
-  let l = length(di);
-  let nl = dot(n, di / l);
-  let h = l / sph.w;
-  return clamp(nl, 0.0, 1.0) / (h * h);
+
+@vertex fn vs(v : VIn) -> VOut {
+  var o : VOut;
+  o.clip = u.viewProj * vec4f(v.a0.xyz, 1.0);
+  o.wpos = v.a0.xyz; o.mat = v.a0.w;
+  o.nrm = v.a1.xyz; o.ext = v.a1.w;
+  o.rest = v.a2.xyz;
+  o.brush = v.a3;
+  var oc = vec2f(1.0);
+  if (v.a0.w < 2.5 || v.a0.w > 3.5) {
+    let N = normalize(v.a1.xyz);
+    oc = occlusion(v.a0.xyz + N * 0.01, N, u.keyDir.xyz, 3.0, 0.8, 8.0, true);
+  }
+  o.occ = oc;
+  return o;
 }
 
 fn softbox(R : vec3f, D : vec3f, sx : f32, sy : f32) -> f32 {
@@ -372,18 +395,21 @@ fn aces(x : vec3f) -> vec3f {
   let dhx = dpdx(p.h);
   let dhy = dpdy(p.h);
 
-  let nsph = u32(u.params.y);
   let P = i.wpos;
   let L = u.keyDir.xyz;
 
   // ---------------------------------------------------------------- floor
   if (mat > 2.5 && mat < 3.5) {
-    var vis = 1.0; var ao = 1.0;
-    for (var s = 0u; s < nsph; s++) {
-      let sp = u.spheres[s];
-      vis *= sphSoftShadow(P, L, sp, 1.6);
-      ao *= 1.0 - clamp(sphOcc(P, vec3f(0.0, 1.0, 0.0), sp) * 0.9, 0.0, 1.0);
+    // skip the floor far from the plush: outside both the shadow cone and occlusion reach
+    var oc = vec2f(1.0);
+    let dc = u.bound.xyz - P;
+    let bb = dot(dc, L);
+    let lim = u.bound.w + max(bb, 0.0) * 0.25;
+    let near = dot(dc, dc) < (u.bound.w + 3.6) * (u.bound.w + 3.6);
+    if (near || (bb > -u.bound.w && dot(dc, dc) - bb * bb < lim * lim)) {
+      oc = occlusion(P, vec3f(0.0, 1.0, 0.0), L, 1.6, 0.9, 4.0, false);
     }
+    let vis = oc.x; let ao = oc.y;
     let r = length(P.xz);
     let pool = 1.0 + 0.035 * exp(-r * r / 10.0);
     let sh = mix(vec3f(0.78, 0.68, 0.66), vec3f(1.0), vis);
@@ -406,13 +432,7 @@ fn aces(x : vec3f) -> vec3f {
   if (dot(Nb, Nb) > 1e-20) { N = normalize(Nb); }
 
   // ---------------------------------------------------------------- shadow + occlusion
-  var vis = 1.0; var ao = 1.0;
-  for (var s = 0u; s < nsph; s++) {
-    let sp = u.spheres[s];
-    if (length(P - sp.xyz) < sp.w * 1.12) { continue; }
-    vis *= sphSoftShadow(P + N * 0.01, L, sp, 3.0);
-    ao *= 1.0 - clamp(sphOcc(P, N, sp) * 0.8, 0.0, 0.9);
-  }
+  let vis = i.occ.x; var ao = i.occ.y;
   let fy = smoothstep(0.0, 0.45, P.y);
   ao *= mix(1.0 - 0.6 * (0.55 - 0.45 * N.y), 1.0, fy);
   ao = clamp(ao, 0.0, 1.0);
@@ -511,7 +531,7 @@ const pipeline = device.createRenderPipeline({
   multisample: { count: SAMPLES },
 });
 
-const UNIFORM_FLOATS = 16 + 8 * 4 + 64 * 4;
+const UNIFORM_FLOATS = 16 + 9 * 4 + 64 * 4;
 const uniformData = new Float32Array(UNIFORM_FLOATS);
 const uniformBuf = device.createBuffer({ size: UNIFORM_FLOATS * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 const bindGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniformBuf } }] });
@@ -789,12 +809,27 @@ function collisions() {
   }
   const sh = 0.08 / NB;
   for (let i = 0; i < NB; i++) { pos[i * 3] -= rx * sh; pos[i * 3 + 1] -= ry * sh; pos[i * 3 + 2] -= rz * sh; }
-  // tentacle vs. tentacle
+  // tentacle vs. tentacle, with a per-tentacle bounding-box broadphase
+  for (let k = 0; k < NK; k++) {
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (let j = 2; j < NT; j++) {
+      const o = tid(k, j) * 3;
+      if (pos[o] < x0) x0 = pos[o]; if (pos[o] > x1) x1 = pos[o];
+      if (pos[o + 1] < y0) y0 = pos[o + 1]; if (pos[o + 1] > y1) y1 = pos[o + 1];
+      if (pos[o + 2] < z0) z0 = pos[o + 2]; if (pos[o + 2] > z1) z1 = pos[o + 2];
+    }
+    const m = 0.45, o = k * 6;
+    tBox[o] = x0 - m; tBox[o + 1] = y0 - m; tBox[o + 2] = z0 - m; tBox[o + 3] = x1 + m; tBox[o + 4] = y1 + m; tBox[o + 5] = z1 + m;
+  }
   for (let a = NB; a < NP; a++) {
     const ka = ((a - NB) / NT) | 0, ja = (a - NB) % NT;
     if (ja < 2) continue;
     for (let b = a + 1; b < NP; b++) {
       const kb = ((b - NB) / NT) | 0, jb = (b - NB) % NT;
+      if (kb !== ka && jb === 0) {
+        const p = ka * 6, q = kb * 6;
+        if (tBox[p] > tBox[q + 3] || tBox[q] > tBox[p + 3] || tBox[p + 1] > tBox[q + 4] || tBox[q + 1] > tBox[p + 4] || tBox[p + 2] > tBox[q + 5] || tBox[q + 2] > tBox[p + 5]) { b += NT - 1; continue; }
+      }
       if (jb < 2 || (ka === kb && jb - ja < 3)) continue;
       const dx = pos[b * 3] - pos[a * 3], dy = pos[b * 3 + 1] - pos[a * 3 + 1], dz = pos[b * 3 + 2] - pos[a * 3 + 2];
       const md = (radius[a] + radius[b]) * 0.9;
@@ -808,6 +843,7 @@ function collisions() {
   }
 }
 
+const tBox = new Float32Array(NK * 6);
 function floorAndBounds() {
   const LIM = 3.6;
   for (let i = 0; i < NP; i++) {
@@ -972,7 +1008,7 @@ function stickConstraints(f) {
   }
 }
 function stickFrameUpdate(dt) {
-  stick.prevTip = stick.tip.slice();
+  stick.prevTip[0] = stick.tip[0]; stick.prevTip[1] = stick.tip[1]; stick.prevTip[2] = stick.tip[2];
   if (!stick.on) return;
   for (let i = 0; i < NP; i++) if (attachCool[i] > 0) attachCool[i] -= dt;
   const d = [right[0] * 0.5 + up[0] * 0.8 - fwd[0] * 0.3, right[1] * 0.5 + up[1] * 0.8 - fwd[1] * 0.3, right[2] * 0.5 + up[2] * 0.8 - fwd[2] * 0.3];
@@ -983,9 +1019,9 @@ function stickFrameUpdate(dt) {
   stick.tip[1] = Math.max(stick.tip[1], STICK_R + 0.01);
 }
 
-const SUB = 10;
 const bscale = [1, 1, 1];
 function step(dt, t) {
+  const SUB = Math.min(12, Math.max(4, Math.round(dt * 600)));
   const h = dt / SUB;
   updateSway(t);
   breath = Math.sin(t * 1.65);
@@ -1020,7 +1056,7 @@ function step(dt, t) {
       if (v > 28) { const f = 28 / v; vel[o] *= f; vel[o + 1] *= f; vel[o + 2] *= f; }
     }
   }
-  for (const g of grabs.values()) g.Tprev = g.T.slice();
+  for (const g of grabs.values()) { g.Tprev[0] = g.T[0]; g.Tprev[1] = g.T[1]; g.Tprev[2] = g.T[2]; }
 }
 
 // =====================================================================
@@ -1194,7 +1230,8 @@ function buildTentacle(k) {
   }
   const writeRing = (r, cx, cy, cz, tx, ty, tz, rad, s, capA) => {
     const bx = ty * nz - tz * ny, by = tz * nx - tx * nz, bz = tx * ny - ty * nx;
-    tFrame.set([tx, ty, tz, nx, ny, nz, bx, by, bz], (k * TR + r) * 9);
+    const fo = (k * TR + r) * 9;
+    tFrame[fo] = tx; tFrame[fo + 1] = ty; tFrame[fo + 2] = tz; tFrame[fo + 3] = nx; tFrame[fo + 4] = ny; tFrame[fo + 5] = nz; tFrame[fo + 6] = bx; tFrame[fo + 7] = by; tFrame[fo + 8] = bz;
     const ca = Math.cos(capA), sa = Math.sin(capA);
     for (let q = 0; q <= RING; q++) {
       const th = q / RING, an = th * Math.PI * 2, c = Math.cos(an), sn = Math.sin(an);
@@ -1642,10 +1679,15 @@ function writeUniforms(t) {
   u.set([...target.body, 1], 32); u.set([...target.under, 1], 36); u.set([...BG, 1], 40);
   // shadow / occlusion proxies
   let n = 0;
-  const sp = (x, y, z, r) => { u.set([x, y, z, r], 48 + n * 4); n++; };
+  const sp = (x, y, z, r) => { u[52 + n * 4] = x; u[53 + n * 4] = y; u[54 + n * 4] = z; u[55 + n * 4] = r; n++; };
   sp(bodyO[0], bodyO[1] + 0.05, bodyO[2], 0.9);
   for (let k2 = 0; k2 < NK; k2++) for (let j = 3; j < NT; j += 2) { const i = tid(k2, j); sp(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], radius[i] * 0.95); }
   u.set([t, n, palette.blush * (1 + happy * 0.9), 0.46], 44);
+  let bx = 0, by = 0, bz = 0, br = 0;
+  for (let q = 0; q < n; q++) { bx += u[52 + q * 4]; by += u[53 + q * 4]; bz += u[54 + q * 4]; }
+  bx /= n; by /= n; bz /= n;
+  for (let q = 0; q < n; q++) br = Math.max(br, Math.hypot(u[52 + q * 4] - bx, u[53 + q * 4] - by, u[54 + q * 4] - bz) + u[55 + q * 4]);
+  u[48] = bx; u[49] = by; u[50] = bz; u[51] = br;
   device.queue.writeBuffer(uniformBuf, 0, u);
 }
 
@@ -1683,8 +1725,8 @@ function frame(now) {
   });
   pass.setPipeline(pipeline);
   pass.setBindGroup(0, bindGroup);
-  pass.setVertexBuffer(0, fvbuf); pass.setIndexBuffer(fibuf, 'uint32'); pass.drawIndexed(6);
   pass.setVertexBuffer(0, vbuf); pass.setIndexBuffer(ibuf, 'uint32'); pass.drawIndexed(stick.on ? indexData.length : PLUSH_INDICES);
+  pass.setVertexBuffer(0, fvbuf); pass.setIndexBuffer(fibuf, 'uint32'); pass.drawIndexed(6);
   pass.end();
   device.queue.submit([enc.finish()]);
   requestAnimationFrame(frame);
