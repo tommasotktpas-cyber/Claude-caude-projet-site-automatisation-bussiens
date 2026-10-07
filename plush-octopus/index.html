@@ -6,99 +6,191 @@
 <title>Plush Octopus</title>
 <meta name="description" content="An interactive soft-body plush octopus rendered with native WebGPU and WGSL.">
 <style>
+  /* Layout: a specimen sheet. Title and field notes on the left, instrument panel on the right,
+     the plush alone in a seamless studio sweep. Single deliberate light theme matching the 3D backdrop. */
   :root {
-    --bg: #f1e9e3;
-    --ink: #2a1a17;
-    --muted: #8c736b;
-    --line: rgba(42, 26, 23, .14);
-    --accent: #e0705c;
+    --bg: #e9e6e3;
+    --ink: #1f1b19;
+    --muted: #7d7470;
+    --faint: #a59d98;
+    --line: rgba(31, 27, 25, .13);
+    --card: rgba(247, 245, 243, .78);
+    --accent: #1f1b19;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+    color-scheme: light;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overflow: hidden; }
-  body {
-    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Arial, sans-serif;
-    -webkit-font-smoothing: antialiased;
-    user-select: none; -webkit-user-select: none;
-  }
+  body { font-family: var(--sans); -webkit-font-smoothing: antialiased; user-select: none; -webkit-user-select: none; }
   canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
   canvas.grabbing { cursor: grabbing; }
-  canvas.over { cursor: pointer; }
-  .vignette {
-    position: fixed; inset: 0; pointer-events: none;
-    background: radial-gradient(120% 95% at 50% 42%, transparent 58%, rgba(96, 54, 42, .10) 100%);
-  }
-  .ui { position: fixed; inset: 0; pointer-events: none; padding: clamp(18px, 3.2vw, 36px); display: grid;
-        grid-template-rows: auto 1fr auto; grid-template-columns: 1fr auto; }
-  header { grid-column: 1; }
-  .kicker { font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--muted); }
-  h1 {
-    margin: .22em 0 0; font-weight: 400; line-height: .92; letter-spacing: -.025em;
-    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
-    font-size: clamp(38px, 6.4vw, 76px);
-  }
-  h1 em { font-style: italic; color: var(--accent); }
-  .lede { max-width: 30ch; margin: 14px 0 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
-  .meta { grid-column: 2; text-align: right; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); line-height: 1.9; }
-  .meta b { color: var(--ink); font-weight: 500; }
-  footer { grid-column: 1 / -1; grid-row: 3; display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
-  .hints { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12px; color: var(--muted); max-width: 640px; }
-  .hints span b { color: var(--ink); font-weight: 500; }
-  .controls { display: flex; align-items: center; gap: 10px; pointer-events: auto; }
-  .swatch { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line); padding: 0; cursor: pointer;
-            outline-offset: 3px; box-shadow: inset 0 -3px 6px rgba(0,0,0,.08); }
-  .swatch[aria-pressed="true"] { outline: 1.5px solid var(--ink); }
-  .btn { font: inherit; font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink);
-         background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; cursor: pointer; }
-  .btn:hover { border-color: var(--ink); }
-  .sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
-  .tools { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; gap: 2px; }
-  .tool { font: inherit; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
-          background: transparent; border: 0; border-radius: 999px; padding: 6px 12px; cursor: pointer; }
-  .tool:hover { color: var(--ink); }
-  .tool[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
-  .tool:focus-visible, .btn:focus-visible, .swatch:focus-visible { outline: 1.5px solid var(--accent); outline-offset: 2px; }
+  canvas.over, canvas.petmode.over { cursor: pointer; }
   canvas.stickmode { cursor: crosshair; }
-  canvas.petmode.over { cursor: pointer; }
-  #fallback { position: fixed; inset: 0; display: none; place-items: center; text-align: center; padding: 24px; }
+  .vignette { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(130% 100% at 48% 45%, transparent 60%, rgba(60, 50, 44, .08) 100%); }
+  .label { font-family: var(--mono); font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+
+  .title { position: fixed; left: clamp(16px, 2.4vw, 32px); top: clamp(16px, 2.4vw, 28px); pointer-events: none; max-width: min(420px, 60vw); }
+  .title h1 { margin: 14px 0 0; font-family: var(--serif); font-style: italic; font-weight: 400; letter-spacing: -.02em;
+              font-size: clamp(44px, 6.6vw, 92px); line-height: .9; text-wrap: balance; }
+  .title h1 span { display: block; padding-left: .32em; }
+  .title p { margin: 18px 0 0; font-family: var(--serif); font-size: 13px; line-height: 1.45; color: var(--muted); max-width: 26ch; }
+
+  .live { position: fixed; right: clamp(16px, 2.4vw, 28px); top: clamp(16px, 2.4vw, 22px); display: inline-flex; align-items: center; gap: 7px;
+          border: 1px solid var(--line); border-radius: 3px; padding: 4px 8px; background: var(--card); pointer-events: none; }
+  .live i { width: 6px; height: 6px; border-radius: 50%; background: #3f9a6e; box-shadow: 0 0 0 3px rgba(63, 154, 110, .16); }
+
+  .panel { position: fixed; right: clamp(16px, 2.4vw, 28px); top: 58px; width: 228px; max-height: calc(100% - 140px); overflow: auto;
+           background: var(--card); border: 1px solid var(--line); border-radius: 4px; padding: 12px 12px 10px;
+           -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); display: grid; gap: 11px; }
+  .panel header { display: flex; justify-content: space-between; align-items: baseline; }
+  .panel header em { font-family: var(--serif); font-size: 12px; color: var(--muted); }
+  .group { display: grid; gap: 7px; }
+  .row { display: grid; grid-template-columns: repeat(var(--n, 2), 1fr); gap: 5px; }
+  button { font: inherit; color: var(--ink); }
+  .b { font-family: var(--sans); font-size: 10.5px; background: rgba(255, 255, 255, .55); border: 1px solid var(--line); border-radius: 2px;
+       padding: 6px 6px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 28px; }
+  .b:hover { border-color: rgba(31, 27, 25, .4); }
+  .b[aria-pressed="true"] { background: var(--ink); color: #f5f2ef; border-color: var(--ink); }
+  .b svg { width: 12px; height: 12px; flex: none; }
+  .b:focus-visible, .sw:focus-visible, input:focus-visible { outline: 1.5px solid var(--ink); outline-offset: 2px; }
+  .sw { cursor: pointer; background: transparent; border: 1px solid transparent; border-radius: 2px; padding: 4px 3px 3px; display: grid; gap: 4px; justify-items: center; }
+  .sw b { display: block; width: 100%; height: 22px; border: 1px solid var(--line); background: #f8f6f4; position: relative; }
+  .sw b::after { content: ""; position: absolute; left: 3px; right: 3px; top: 6px; height: 4px; background: var(--c); }
+  .sw span { font-size: 9.5px; color: var(--muted); }
+  .sw[aria-pressed="true"] { border-color: var(--ink); }
+  .slider { display: grid; gap: 3px; }
+  .slider .top { display: flex; justify-content: space-between; align-items: baseline; }
+  .slider output { font-family: var(--mono); font-size: 10px; font-variant-numeric: tabular-nums; }
+  .slider .ends { display: flex; justify-content: space-between; font-family: var(--serif); font-style: italic; font-size: 10px; color: var(--faint); }
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 16px; background: transparent; margin: 0; }
+  input[type=range]::-webkit-slider-runnable-track { height: 1px; background: var(--ink); opacity: .55; }
+  input[type=range]::-moz-range-track { height: 1px; background: var(--ink); opacity: .55; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 11px; height: 11px; border-radius: 50%; background: #f5f2ef; border: 1px solid var(--ink); margin-top: -5px; }
+  input[type=range]::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: #f5f2ef; border: 1px solid var(--ink); }
+  .checks { display: flex; align-items: center; gap: 12px; font-size: 10.5px; }
+  .checks label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+  .checks input { margin: 0; accent-color: var(--ink); }
+  .checks .b { margin-left: auto; min-height: 24px; padding: 3px 9px; }
+
+  .notes { position: fixed; left: clamp(16px, 2.4vw, 32px); bottom: clamp(16px, 2.4vw, 26px); max-width: min(380px, calc(100% - 32px)); display: grid; gap: 12px; }
+  .hint { font-family: var(--serif); font-style: italic; font-size: 12.5px; line-height: 1.45; color: var(--ink); max-width: 46ch; margin: 0; }
+  .hint .label { font-style: normal; margin-right: 6px; color: var(--ink); }
+  .stats { display: grid; grid-template-columns: repeat(4, auto); gap: 4px 22px; justify-content: start; }
+  .stats div { display: grid; gap: 3px; }
+  .stats strong { font-family: var(--mono); font-weight: 500; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .stats small { font-size: 9px; color: var(--muted); font-weight: 400; margin-left: 2px; }
+  .foot { font-size: 9.5px; line-height: 1.5; color: var(--faint); max-width: 52ch; margin: 0; }
+
+  .inside { position: fixed; right: clamp(16px, 2.4vw, 28px); bottom: clamp(16px, 2.4vw, 26px); width: 228px; display: grid; gap: 6px; }
+  .inside > button { font-family: var(--mono); font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase; background: var(--card);
+                     border: 1px solid var(--line); border-radius: 3px; padding: 7px 10px; cursor: pointer; display: flex; justify-content: space-between; }
+  .inside .body { background: var(--card); border: 1px solid var(--line); border-radius: 3px; padding: 12px; font-family: var(--serif);
+                  font-size: 12px; line-height: 1.5; color: var(--ink); max-height: 40vh; overflow: auto; display: grid; gap: 8px; }
+  .inside .body p { margin: 0; }
+  .inside .body[hidden] { display: none; }
+  .panelToggle { display: none; }
+
+  #fallback { position: fixed; inset: 0; display: none; place-items: center; text-align: center; padding: 24px; background: var(--bg); }
   #fallback div { max-width: 420px; font-size: 14px; line-height: 1.6; color: var(--muted); }
-  #fallback h2 { font-family: "Iowan Old Style", Palatino, Georgia, serif; font-weight: 400; font-style: italic; color: var(--ink); font-size: 28px; margin: 0 0 8px; }
-  @media (max-width: 640px) {
-    .meta { display: none; }
-    .hints { font-size: 11px; gap: 4px 12px; }
-    .lede { display: none; }
+  #fallback h2 { font-family: var(--serif); font-weight: 400; font-style: italic; color: var(--ink); font-size: 28px; margin: 0 0 8px; }
+
+  @media (max-width: 760px) {
+    .title p { display: none; }
+    .panelToggle { display: inline-flex; position: fixed; right: 16px; top: 52px; }
+    .panel { display: none; top: 88px; right: 16px; left: 16px; width: auto; max-height: calc(100% - 210px); }
+    .panel.open { display: grid; }
+    .inside { display: none; }
+    .stats { grid-template-columns: repeat(2, auto); }
+    .foot { display: none; }
   }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
 </style>
 </head>
 <body>
 <canvas id="gl" aria-label="Interactive 3D plush octopus"></canvas>
 <div class="vignette"></div>
-<div class="ui">
-  <header>
-    <div class="kicker">Soft-body study &middot; N&ordm; 08</div>
-    <h1>Plush <em>Octopus</em></h1>
-    <p class="lede">Coral minky, eight floppy arms, safety-glass eyes and a hand-embroidered smile. Simulated, not animated.</p>
-  </header>
-  <div class="meta">
-    <div><b>WebGPU</b> &middot; WGSL</div>
-    <div id="stat">&mdash;</div>
-  </div>
-  <footer>
-    <div class="hints" id="hints"></div>
-    <div class="controls">
-      <div class="tools" role="group" aria-label="Tool">
-        <button class="tool" data-tool="grab" aria-pressed="true" title="Grab (1)">Grab</button>
-        <button class="tool" data-tool="pet" aria-pressed="false" title="Pet (2)">Pet</button>
-        <button class="tool" data-tool="stick" aria-pressed="false" title="Stick (3)">Stick</button>
-      </div>
-      <span class="sep"></span>
-      <button class="swatch" data-c="coral" aria-label="Coral" aria-pressed="true" style="background:#ef8a74"></button>
-      <button class="swatch" data-c="lilac" aria-label="Lilac" aria-pressed="false" style="background:#b9a2dc"></button>
-      <button class="swatch" data-c="mint" aria-label="Mint" aria-pressed="false" style="background:#93cdb7"></button>
-      <span class="sep"></span>
-      <button class="btn" id="reset">Reset</button>
-    </div>
-  </footer>
+
+<div class="title">
+  <div class="label">Material studies / No. 012</div>
+  <h1>Plush <span>Octopus.</span></h1>
+  <p>Eight soft arms in a coat of minky. Floppy, clingy, heavy in the head. Offer it a finger.</p>
 </div>
+
+<div class="live label"><i></i>WebGPU · live</div>
+<button class="b panelToggle" id="panelToggle" aria-expanded="false" aria-controls="panel">Controls</button>
+
+<aside class="panel" id="panel" aria-label="Specimen controls">
+  <header><span class="label">The specimen</span><em>fig. 12</em></header>
+  <div class="group">
+    <span class="label">Tool</span>
+    <div class="row" style="--n:2">
+      <button class="b tool" data-tool="grab" aria-pressed="true" title="Hand (1)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M5 8V3.5a1 1 0 0 1 2 0V7m0-4.5a1 1 0 0 1 2 0V7m0-3a1 1 0 0 1 2 0v3.5m0-2a1 1 0 0 1 2 0V10a4.5 4.5 0 0 1-8.3 2.4L3 9.6a1 1 0 0 1 1.6-1.2L5 9"/></svg>Hand</button>
+      <button class="b tool" data-tool="finger" aria-pressed="false" title="Finger (2)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M7 9V2.5a1 1 0 0 1 2 0V8l3 .8a1.5 1.5 0 0 1 1.1 1.7l-.6 3.5H6.5L4 10.6a1 1 0 0 1 1.4-1.4L7 10.5"/></svg>Finger</button>
+      <button class="b tool" data-tool="pet" aria-pressed="false" title="Comb (3)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M2 6h12v2.5H2zM3.5 8.5V13M6 8.5V13M8.5 8.5V13M11 8.5V13M13.5 8.5V13"/></svg>Comb</button>
+      <button class="b tool" data-tool="stick" aria-pressed="false" title="Stick (4)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M3 13L13 3"/></svg>Stick</button>
+    </div>
+  </div>
+  <div class="group">
+    <span class="label">Fur</span>
+    <div class="row" style="--n:3">
+      <button class="sw" data-c="coral" aria-pressed="false" style="--c:#e8775f"><b></b><span>Coral</span></button>
+      <button class="sw" data-c="lilac" aria-pressed="false" style="--c:#8f77c9"><b></b><span>Lilac</span></button>
+      <button class="sw" data-c="lagoon" aria-pressed="true" style="--c:#3c9a9a"><b></b><span>Lagoon</span></button>
+    </div>
+  </div>
+  <div class="slider">
+    <div class="top"><label class="label" for="stuff">Stuffing</label><output id="stuffV">0.42</output></div>
+    <input type="range" id="stuff" min="0" max="1" step="0.01" value="0.42">
+    <div class="ends"><span>loose</span><span>packed</span></div>
+  </div>
+  <div class="slider">
+    <div class="top"><label class="label" for="pile">Pile</label><output id="pileV">7 mm</output></div>
+    <input type="range" id="pile" min="2" max="14" step="0.5" value="7">
+    <div class="ends"><span>cropped</span><span>shaggy</span></div>
+  </div>
+  <div class="slider">
+    <div class="top"><label class="label" for="damp">Internal damping</label><output id="dampV">0.46</output></div>
+    <input type="range" id="damp" min="0" max="1" step="0.01" value="0.46">
+    <div class="ends"><span>lively</span><span>doughy</span></div>
+  </div>
+  <div class="group">
+    <button class="b" id="shake">Shake it</button>
+    <div class="row" style="--n:2">
+      <button class="b" id="squish">Squish</button>
+      <button class="b" id="toss">Toss</button>
+      <button class="b" id="smooth">Smooth fur</button>
+      <button class="b" id="reset">Reset</button>
+    </div>
+  </div>
+  <div class="checks">
+    <label><input type="checkbox" id="half">½ speed</label>
+    <label><input type="checkbox" id="mesh">Mesh</label>
+    <button class="b" id="pause" aria-pressed="false">Pause</button>
+  </div>
+</aside>
+
+<section class="notes" aria-live="polite">
+  <p class="hint"><span class="label" id="hintTool">Hand</span><span id="hintText"></span></p>
+  <div class="stats">
+    <div><span class="label">Mass</span><strong>≈80<small>g</small></strong></div>
+    <div><span class="label">Volume</span><strong id="sVol">100.0<small>% of rest</small></strong></div>
+    <div><span class="label">Kinetic</span><strong id="sKin">0.00<small>mJ</small></strong></div>
+    <div><span class="label">Holding on</span><strong id="sHold">0<small>grips</small></strong></div>
+  </div>
+  <p class="foot" id="foot">Simulation scale: 1 unit ≈ 6 cm, a 25 cm plush.</p>
+</section>
+
+<div class="inside">
+  <div class="body" id="insidePanel" hidden>
+    <p>The plush is 187 particles. The head is held together by shape matching: every step it finds the best rigid fit of its rest shape and pulls each particle part of the way back, which is what makes it wobble and settle.</p>
+    <p>Each arm is a chain of sixteen particles with stretch constraints and overlapping four-particle clusters that remember their curl. Arms collide with each other, the head and the floor.</p>
+    <p>The coat is drawn as twenty-four shells pushed out along the surface. Strands lean with the nap; combing against it raises them, which reads darker. Shadows come from sphere proxies, evaluated once per vertex in a compute pass.</p>
+  </div>
+  <button id="insideBtn" aria-expanded="false" aria-controls="insidePanel"><span>Inside the experiment</span><span id="insideArrow">▾</span></button>
+</div>
+
 <div id="fallback"><div><h2>WebGPU unavailable</h2>This piece runs on native WebGPU. Please open it in a recent Chrome, Edge, Safari (18+) or Firefox with WebGPU enabled, served over https or localhost.</div></div>
 
 <script>
@@ -107,7 +199,7 @@
 // =====================================================================
 //  Shaders
 // =====================================================================
-const WGSL = /* wgsl */`
+const WGSL_HEAD = /* wgsl */`
 struct U {
   viewProj : mat4x4f,
   camPos   : vec4f,
@@ -119,15 +211,54 @@ struct U {
   bgCol    : vec4f,
   params   : vec4f,          // x time, y sphere count, z blush, w exposure
   bound    : vec4f,          // bounding sphere of all occluders
+  fur      : vec4f,          // x fur on, y pile length, z shell count, w mesh view
   spheres  : array<vec4f, 64>,
 };
 @group(0) @binding(0) var<uniform> u : U;
+`;
+const WGSL_OCC = /* wgsl */`
+// Soft shadow + ambient occlusion from the sphere proxies in a single pass.
+// Spheres outside the light's penumbra cone are skipped exactly (they would return 1),
+// and occlusion fades to zero by 8 radii, so most pixels touch only a handful of spheres.
+fn occlusion(P : vec3f, N : vec3f, L : vec3f, k : f32, aoK : f32, reach : f32, skipSelf : bool) -> vec2f {
+  var vis = 1.0; var ao = 1.0;
+  let pen = 1.0 / (2.5 * k);
+  let n = u32(u.params.y);
+  for (var s = 0u; s < n; s++) {
+    let sp = u.spheres[s];
+    let di = sp.xyz - P;
+    let l2 = dot(di, di);
+    let r2 = sp.w * sp.w;
+    if (skipSelf && l2 < r2 * 1.2544) { continue; }
+    if (l2 < r2 * reach * reach) {
+      let l = sqrt(l2);
+      let occ = clamp(dot(N, di) / l, 0.0, 1.0) * r2 / l2 * (1.0 - smoothstep(0.75 * reach * sp.w, reach * sp.w, l));
+      ao *= 1.0 - min(occ * aoK, 0.9);
+    }
+    let b = dot(di, L);
+    if (b > 0.0) {
+      let perp2 = max(l2 - b * b, 0.0);
+      let lim = sp.w + b * pen;
+      if (perp2 < lim * lim) {
+        let t = b - sqrt(max(r2 - perp2, 0.0));
+        if (t > 0.0) { vis *= smoothstep(0.0, 1.0, (sqrt(perp2) - sp.w) / (t * pen)); }
+      }
+    }
+  }
+  return vec2f(vis, ao);
+}
+
+`;
+const WGSL = WGSL_HEAD + WGSL_OCC + /* wgsl */`
+@group(0) @binding(1) var<storage, read> occBuf : array<vec2f>;
 
 struct VIn {
   @location(0) a0 : vec4f,   // position, material
   @location(1) a1 : vec4f,   // normal, extra (tentacle radius)
   @location(2) a2 : vec4f,   // rest-space coordinates
   @location(3) a3 : vec4f,   // brushed pile: direction (pattern space), amount
+  @location(4) a4 : vec4f,   // fur lean (world), pile scale
+  @builtin(vertex_index) vi : u32,
 };
 struct VOut {
   @builtin(position) clip : vec4f,
@@ -143,7 +274,7 @@ struct VOut {
 
 const PI = 3.14159265;
 const TAU = 6.2831853;
-const TENT_LEN = 2.35;
+const TENT_LEN = 2.1;
 
 fn hash3(p : vec3f) -> f32 {
   var q = fract(p * 0.3183099 + vec3f(0.11, 0.17, 0.13));
@@ -158,7 +289,7 @@ fn noise3(x : vec3f) -> f32 {
              mix(mix(hash3(i + vec3f(0.,0.,1.)), hash3(i + vec3f(1.,0.,1.)), w.x),
                  mix(hash3(i + vec3f(0.,1.,1.)), hash3(i + vec3f(1.,1.,1.)), w.x), w.y), w.z);
 }
-fn tentRadius(s : f32) -> f32 { return 0.052 + 0.17 * pow(1.0 - s, 1.1); }
+fn tentRadius(s : f32) -> f32 { return 0.07 + 0.2 * pow(1.0 - s, 1.2); }
 
 // Pile that has been stroked lies down along the stroke: long streaks follow the
 // stroke direction, the isotropic fuzz flattens and the colour deepens a little.
@@ -299,37 +430,6 @@ fn woodPat(rest : vec3f, px : f32) -> Pat {
   return o;
 }
 
-// Soft shadow + ambient occlusion from the sphere proxies in a single pass.
-// Spheres outside the light's penumbra cone are skipped exactly (they would return 1),
-// and occlusion fades to zero by 8 radii, so most pixels touch only a handful of spheres.
-fn occlusion(P : vec3f, N : vec3f, L : vec3f, k : f32, aoK : f32, reach : f32, skipSelf : bool) -> vec2f {
-  var vis = 1.0; var ao = 1.0;
-  let pen = 1.0 / (2.5 * k);
-  let n = u32(u.params.y);
-  for (var s = 0u; s < n; s++) {
-    let sp = u.spheres[s];
-    let di = sp.xyz - P;
-    let l2 = dot(di, di);
-    let r2 = sp.w * sp.w;
-    if (skipSelf && l2 < r2 * 1.2544) { continue; }
-    if (l2 < r2 * reach * reach) {
-      let l = sqrt(l2);
-      let occ = clamp(dot(N, di) / l, 0.0, 1.0) * r2 / l2 * (1.0 - smoothstep(0.75 * reach * sp.w, reach * sp.w, l));
-      ao *= 1.0 - min(occ * aoK, 0.9);
-    }
-    let b = dot(di, L);
-    if (b > 0.0) {
-      let perp2 = max(l2 - b * b, 0.0);
-      let lim = sp.w + b * pen;
-      if (perp2 < lim * lim) {
-        let t = b - sqrt(max(r2 - perp2, 0.0));
-        if (t > 0.0) { vis *= smoothstep(0.0, 1.0, (sqrt(perp2) - sp.w) / (t * pen)); }
-      }
-    }
-  }
-  return vec2f(vis, ao);
-}
-
 @vertex fn vs(v : VIn) -> VOut {
   var o : VOut;
   o.clip = u.viewProj * vec4f(v.a0.xyz, 1.0);
@@ -338,10 +438,7 @@ fn occlusion(P : vec3f, N : vec3f, L : vec3f, k : f32, aoK : f32, reach : f32, s
   o.rest = v.a2.xyz;
   o.brush = v.a3;
   var oc = vec2f(1.0);
-  if (v.a0.w < 2.5 || v.a0.w > 3.5) {
-    let N = normalize(v.a1.xyz);
-    oc = occlusion(v.a0.xyz + N * 0.01, N, u.keyDir.xyz, 3.0, 0.8, 8.0, true);
-  }
+  if (v.a0.w < 2.5 || v.a0.w > 3.5) { oc = occBuf[v.vi]; }
   o.occ = oc;
   return o;
 }
@@ -391,7 +488,19 @@ fn aces(x : vec3f) -> vec3f {
   p.h = 0.0; p.col = vec3f(0.0); p.sheen = 1.0; p.thread = 0.0;
   if (mat < 0.5) { p = bodyPat(i.rest, px, i.brush); }
   else if (mat < 1.5) { p = tentPat(i.rest, px, i.brush); }
+  else if (mat > 4.5) { p.col = vec3f(0.80, 0.50, 0.38); p.h = 0.0; p.sheen = 0.0; p.thread = 0.0; }
   else if (mat > 3.5) { p = woodPat(i.rest, px); }
+  if (u.fur.w > 0.5 && mat < 1.5) {
+    // mesh view: show the procedural grid the simulation skins
+    var g = vec2f(0.0);
+    if (mat < 0.5) {
+      let n = normalize(i.rest);
+      g = vec2f((atan2(n.x, n.z) / TAU + 0.5) * 36.0, (asin(clamp(n.y, -1.0, 1.0)) / PI + 0.5) * 24.0);
+    } else { g = vec2f(i.rest.x * 30.0, i.rest.y * 20.0); }
+    let e = max(abs(fract(g.x) - 0.5), abs(fract(g.y) - 0.5));
+    p.col = mix(p.col, vec3f(0.02), smoothstep(0.44, 0.49, e) * 0.85);
+  }
+  if (u.fur.x > 0.5 && mat < 1.5) { p.col *= 0.6; }
   let dhx = dpdx(p.h);
   let dhy = dpdy(p.h);
 
@@ -493,6 +602,91 @@ fn aces(x : vec3f) -> vec3f {
   col = pow(col, vec3f(1.0 / 2.2));
   return vec4f(col, 1.0);
 }
+
+// ---------------------------------------------------------------- fur shells
+// The coat is drawn as stacked shells pushed out along the normal. Each shell keeps
+// only the cross-section of jittered strands (one per cell), which taper to the tip,
+// lean with the nap or with the comb, and fade into soft edges through alpha-to-coverage.
+struct FurOut {
+  @builtin(position) clip : vec4f,
+  @location(0) col : vec3f,
+  @location(1) pq : vec3f,
+  @location(2) h : f32,
+  @location(3) sheen : vec3f,
+};
+fn hash33(p : vec3f) -> vec3f {
+  var q = fract(p * vec3f(0.1031, 0.1030, 0.0973));
+  q += dot(q, q.yxz + 33.33);
+  return fract((q.xxy + q.yxx) * q.zyx);
+}
+@vertex fn vsFur(v : VIn, @builtin(instance_index) inst : u32) -> FurOut {
+  var o : FurOut;
+  let h = (f32(inst) + 1.0) / u.fur.z;
+  let pile = u.fur.y * v.a4.w;
+  let N = normalize(v.a1.xyz);
+  let lean = v.a4.xyz;
+  var P = v.a0.xyz + pile * (N * h + lean * (h * h)) - vec3f(0.0, 0.3, 0.0) * pile * h * h;
+  P.y = max(P.y, 0.002);
+  o.clip = u.viewProj * vec4f(P, 1.0);
+  o.h = h;
+
+  var base = u.bodyCol.rgb;
+  if (v.a0.w < 0.5) {
+    o.pq = normalize(v.a2.xyz);
+  } else {
+    let s = v.a2.x; let th = v.a2.y; let r = tentRadius(s);
+    o.pq = vec3f(s * TENT_LEN, cos(TAU * th) * r, sin(TAU * th) * r) + vec3f(v.a2.z * 3.7);
+    let circ = TAU * r;
+    base = mix(base, u.underCol.rgb, smoothstep(-0.002, 0.004, (0.25 - abs(th - 0.5)) * circ));
+  }
+  base *= clamp(vec3f(1.0) - 0.2 * v.a3.w * vec3f(1.0, 1.32, 1.26), vec3f(0.5), vec3f(1.0));
+
+  let occ = occBuf[v.vi];
+  let Nf = normalize(N + lean * (h * 1.2));
+  let V = normalize(u.camPos.xyz - P);
+  let L = u.keyDir.xyz;
+  let wrapK = clamp((dot(Nf, L) + 0.5) / 1.5, 0.0, 1.0);
+  let wrapF = clamp((dot(Nf, u.fillDir.xyz) + 0.6) / 1.6, 0.0, 1.0);
+  let wrapR = clamp((dot(Nf, u.rimDir.xyz) + 0.3) / 1.3, 0.0, 1.0);
+  let amb = mix(vec3f(0.95, 0.80, 0.74) * 0.30, vec3f(0.92, 0.92, 1.0) * 0.38, clamp(Nf.y * 0.5 + 0.5, 0.0, 1.0));
+  let light = vec3f(1.0, 0.93, 0.86) * 2.1 * wrapK * mix(0.35, 1.0, occ.x)
+            + vec3f(0.78, 0.86, 1.0) * 0.55 * wrapF
+            + vec3f(1.0, 0.95, 0.93) * 1.0 * wrapR
+            + amb * occ.y;
+  o.col = base * light * mix(0.6, 1.0, occ.y);
+  let fres = pow(1.0 - clamp(abs(dot(N, V)), 0.0, 1.0), 2.0);
+  o.sheen = mix(base, vec3f(1.0, 0.96, 0.92), 0.55) * (fres * 0.9 + 0.15 * wrapK) * occ.y;
+  return o;
+}
+@fragment fn fsFur(i : FurOut) -> @location(0) vec4f {
+  let q = i.pq * 118.0;
+  let hv = hash33(floor(q));
+  let d = length(fract(q) - (vec3f(0.2) + 0.6 * hv));
+  let len = 0.55 + 0.45 * hv.z;
+  let t = i.h / len;
+  if (t >= 1.0) { discard; }
+  let r = 0.56 * pow(1.0 - t, 0.7);
+  let a = 1.0 - smoothstep(r - 0.07, r + 0.07, d);
+  if (a < 0.02) { discard; }
+  var col = i.col * (0.55 + 0.45 * i.h) * (0.93 + 0.14 * hv.x) + i.sheen * i.h * i.h * 0.8;
+  col = aces(col * u.params.w);
+  return vec4f(pow(col, vec3f(1.0 / 2.2)), a);
+}
+`;
+const WGSL_CS = WGSL_HEAD + WGSL_OCC + /* wgsl */`
+@group(0) @binding(1) var<storage, read> verts : array<f32>;
+@group(0) @binding(2) var<storage, read_write> occOut : array<vec2f>;
+// one occlusion evaluation per vertex per frame, shared by the skin and every fur shell
+@compute @workgroup_size(64) fn occCS(@builtin(global_invocation_id) id : vec3u) {
+  let v = id.x;
+  if (v >= arrayLength(&occOut)) { return; }
+  let b = v * 20u;
+  let mat = verts[b + 3u];
+  if (mat > 2.5 && mat < 3.5) { occOut[v] = vec2f(1.0); return; }
+  let P = vec3f(verts[b], verts[b + 1u], verts[b + 2u]);
+  let N = normalize(vec3f(verts[b + 4u], verts[b + 5u], verts[b + 6u]) + vec3f(0.0, 1e-6, 0.0));
+  occOut[v] = occlusion(P + N * 0.01, N, u.keyDir.xyz, 3.0, 0.8, 8.0, true);
+}
 `;
 
 // =====================================================================
@@ -513,28 +707,52 @@ context.configure({ device, format, alphaMode: 'opaque' });
 const module = device.createShaderModule({ code: WGSL });
 module.getCompilationInfo?.().then((ci) => { for (const m of ci.messages) console[m.type === 'error' ? 'error' : 'warn'](`WGSL ${m.lineNum}:${m.linePos} ${m.message}`); });
 
+const csModule = device.createShaderModule({ code: WGSL_CS });
+csModule.getCompilationInfo?.().then((ci) => { for (const m of ci.messages) console[m.type === 'error' ? 'error' : 'warn'](`WGSL(cs) ${m.lineNum}:${m.linePos} ${m.message}`); });
+
 const SAMPLES = 4;
+const GS = GPUShaderStage;
+const renderBGL = device.createBindGroupLayout({ entries: [
+  { binding: 0, visibility: GS.VERTEX | GS.FRAGMENT, buffer: { type: 'uniform' } },
+  { binding: 1, visibility: GS.VERTEX, buffer: { type: 'read-only-storage' } },
+] });
+const computeBGL = device.createBindGroupLayout({ entries: [
+  { binding: 0, visibility: GS.COMPUTE, buffer: { type: 'uniform' } },
+  { binding: 1, visibility: GS.COMPUTE, buffer: { type: 'read-only-storage' } },
+  { binding: 2, visibility: GS.COMPUTE, buffer: { type: 'storage' } },
+] });
+const renderLayout = device.createPipelineLayout({ bindGroupLayouts: [renderBGL] });
+const vertexLayout = [{ arrayStride: 80, attributes: [
+  { shaderLocation: 0, offset: 0, format: 'float32x4' },
+  { shaderLocation: 1, offset: 16, format: 'float32x4' },
+  { shaderLocation: 2, offset: 32, format: 'float32x4' },
+  { shaderLocation: 3, offset: 48, format: 'float32x4' },
+  { shaderLocation: 4, offset: 64, format: 'float32x4' },
+] }];
 const pipeline = device.createRenderPipeline({
-  layout: 'auto',
-  vertex: {
-    module, entryPoint: 'vs',
-    buffers: [{ arrayStride: 64, attributes: [
-      { shaderLocation: 0, offset: 0, format: 'float32x4' },
-      { shaderLocation: 1, offset: 16, format: 'float32x4' },
-      { shaderLocation: 2, offset: 32, format: 'float32x4' },
-      { shaderLocation: 3, offset: 48, format: 'float32x4' },
-    ] }],
-  },
+  layout: renderLayout,
+  vertex: { module, entryPoint: 'vs', buffers: vertexLayout },
   fragment: { module, entryPoint: 'fs', targets: [{ format }] },
   primitive: { topology: 'triangle-list', cullMode: 'none' },
   depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
   multisample: { count: SAMPLES },
 });
+const furPipeline = device.createRenderPipeline({
+  layout: renderLayout,
+  vertex: { module, entryPoint: 'vsFur', buffers: vertexLayout },
+  fragment: { module, entryPoint: 'fsFur', targets: [{ format }] },
+  primitive: { topology: 'triangle-list', cullMode: 'none' },
+  depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
+  multisample: { count: SAMPLES, alphaToCoverageEnabled: true },
+});
+const occPipeline = device.createComputePipeline({
+  layout: device.createPipelineLayout({ bindGroupLayouts: [computeBGL] }),
+  compute: { module: csModule, entryPoint: 'occCS' },
+});
 
-const UNIFORM_FLOATS = 16 + 9 * 4 + 64 * 4;
+const UNIFORM_FLOATS = 16 + 10 * 4 + 64 * 4;
 const uniformData = new Float32Array(UNIFORM_FLOATS);
 const uniformBuf = device.createBuffer({ size: UNIFORM_FLOATS * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-const bindGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniformBuf } }] });
 
 // =====================================================================
 //  Small math helpers
@@ -586,8 +804,8 @@ const H0 = RYB + 0.01;                 // rest height of the body origin
 const NS = 52, NI = 7, NB = NS + NI;   // shell + interior body particles
 const NK = 8, NT = 16;                 // tentacles x particles
 const NP = NB + NK * NT;
-const TLEN = 2.35;
-const tRad = (s) => 0.052 + 0.17 * Math.pow(1 - s, 1.1);
+const TLEN = 2.1;
+const tRad = (s) => 0.07 + 0.2 * Math.pow(1 - s, 1.2);
 const tid = (k, j) => NB + k * NT + j;
 
 const restL = new Float32Array(NP * 3);  // body-local rest positions (origin = body center)
@@ -709,7 +927,7 @@ function shapeMatchBody(h, bs) {
     const gx = cx + R[0] * qx + R[3] * qy + R[6] * qz;
     const gy = cy + R[1] * qx + R[4] * qy + R[7] * qz;
     const gz = cz + R[2] * qx + R[5] * qy + R[8] * qz;
-    const w = bodyOmega[n] * h, al = Math.min(1, w * w);
+    const w = bodyOmega[n] * h * stuffK, al = Math.min(1, w * w);
     pos[i] += (gx - pos[i]) * al; pos[i + 1] += (gy - pos[i + 1]) * al; pos[i + 2] += (gz - pos[i + 2]) * al;
   }
   bodyC[0] = cx; bodyC[1] = cy; bodyC[2] = cz;
@@ -738,7 +956,7 @@ function tentacleClusters(h) {
       extractRotation(_A, clQuat, qq, 2);
       quatToMat(clQuat, qq, _M);
       const s = (c + 1.5) / (NT - 1);
-      const om = lerp(46, 24, s), al = Math.min(1, (om * h) * (om * h));
+      const om = lerp(46, 24, s) * Math.sqrt(stuffK), al = Math.min(1, (om * h) * (om * h));
       for (let m = 0; m < CL; m++) {
         const i = tid(k, c + m) * 3;
         const qx = clQ[qo + m * 3], qy = clQ[qo + m * 3 + 1], qz = clQ[qo + m * 3 + 2];
@@ -926,7 +1144,7 @@ function updateSway(t) {
 // ---------------------------------------------------------------- the stick
 // A kinematic wooden capsule. It shoves the plush around, and any tentacle that
 // touches it clings on (wrapping around it) until it is yanked off hard enough.
-const stick = { on: false, tip: [0, 0, 0], prevTip: [0, 0, 0], tipT: [0, 0, 0], dir: [0, 1, 0] };
+const stick = { on: false, kind: 'stick', L: 2.6, r: 0.055, tip: [0, 0, 0], prevTip: [0, 0, 0], tipT: [0, 0, 0], dir: [0, 1, 0] };
 const attached = new Map();           // particle -> { u, phi }
 const attachCool = new Float32Array(NP);
 const attachCount = new Int32Array(NK);
@@ -939,7 +1157,7 @@ function stickFrame(a) {
   _e2[0] = a[1] * _e1[2] - a[2] * _e1[1]; _e2[1] = a[2] * _e1[0] - a[0] * _e1[2]; _e2[2] = a[0] * _e1[1] - a[1] * _e1[0];
 }
 function stickConstraints(f) {
-  const a = stick.dir, L = STICK_L, rs = STICK_R;
+  const a = stick.dir, L = stick.L, rs = stick.r;
   const Ax = lerp(stick.prevTip[0], stick.tip[0], f), Ay = lerp(stick.prevTip[1], stick.tip[1], f), Az = lerp(stick.prevTip[2], stick.tip[2], f);
   stickFrame(a);
   // 1) body: push the ellipsoid off the deepest point of the stick, denting it locally
@@ -989,11 +1207,13 @@ function stickConstraints(f) {
       pos[o] += ex * 0.6; pos[o + 1] += ey * 0.6; pos[o + 2] += ez * 0.6;
       continue;
     }
-    const md = rs + radius[i] * 0.95;
-    if (d < md) {
-      const m = md / d;
-      pos[o] = Ax + a[0] * t * L + dx * m; pos[o + 1] = Ay + a[1] * t * L + dy * m; pos[o + 2] = Az + a[2] * t * L + dz * m;
-      if (j >= 4 && attachCool[i] <= 0 && attachCount[k] < 6 && t > 0.02 && t < 0.98) {
+    const md = rs + radius[i] * 0.95, grip = stick.kind === 'finger' ? 0.16 : 0;
+    if (d < md + grip) {
+      if (d < md) {
+        const m = md / d;
+        pos[o] = Ax + a[0] * t * L + dx * m; pos[o + 1] = Ay + a[1] * t * L + dy * m; pos[o + 2] = Az + a[2] * t * L + dz * m;
+      }
+      if (j >= 4 && attachCool[i] <= 0 && attachCount[k] < 6 && (stick.kind === 'finger' || (t > 0.02 && t < 0.98))) {
         attached.set(i, { u: t, phi: Math.atan2(dx * _e2[0] + dy * _e2[1] + dz * _e2[2], dx * _e1[0] + dy * _e1[1] + dz * _e1[2]) });
         attachCount[k]++;
         happy = Math.min(1, happy + 0.25);
@@ -1011,23 +1231,33 @@ function stickFrameUpdate(dt) {
   stick.prevTip[0] = stick.tip[0]; stick.prevTip[1] = stick.tip[1]; stick.prevTip[2] = stick.tip[2];
   if (!stick.on) return;
   for (let i = 0; i < NP; i++) if (attachCool[i] > 0) attachCool[i] -= dt;
-  const d = [right[0] * 0.5 + up[0] * 0.8 - fwd[0] * 0.3, right[1] * 0.5 + up[1] * 0.8 - fwd[1] * 0.3, right[2] * 0.5 + up[2] * 0.8 - fwd[2] * 0.3];
+  // the stick is held from above and to the right; a finger reaches in from the viewer
+  const [wr, wu, wf] = stick.kind === 'finger' ? [0.2, 0.35, -0.9] : [0.5, 0.8, -0.3];
+  const d = [right[0] * wr + up[0] * wu + fwd[0] * wf, right[1] * wr + up[1] * wu + fwd[1] * wf, right[2] * wr + up[2] * wu + fwd[2] * wf];
   const l = Math.hypot(...d);
   stick.dir = [d[0] / l, d[1] / l, d[2] / l];
-  const k = 1 - Math.exp(-28 * dt);
+  const k = 1 - Math.exp(-(stick.kind === 'finger' ? 40 : 28) * dt);
   for (let c = 0; c < 3; c++) stick.tip[c] = lerp(stick.tip[c], stick.tipT[c], k);
-  stick.tip[1] = Math.max(stick.tip[1], STICK_R + 0.01);
+  stick.tip[1] = Math.max(stick.tip[1], stick.r + 0.01);
 }
 
+const matl = { stuff: 0.42, damp: 0.46 };
+let stuffK = 1, shakeT = 0;
 const bscale = [1, 1, 1];
 function step(dt, t) {
+  stuffK = lerp(0.47, 1.73, matl.stuff);
   const SUB = Math.min(12, Math.max(4, Math.round(dt * 600)));
   const h = dt / SUB;
   updateSway(t);
   breath = Math.sin(t * 1.65);
   bscale[0] = 1 - 0.008 * breath; bscale[1] = 1 + 0.018 * breath; bscale[2] = 1 - 0.008 * breath;
-  const air = Math.exp(-0.35 * h), kd = 1 - Math.exp(-3.2 * h), td = 1 - Math.exp(-7 * h);
+  const air = Math.exp(-0.35 * h), kd = 1 - Math.exp(-lerp(0.5, 6.4, matl.damp) * h), td = 1 - Math.exp(-lerp(2, 12, matl.damp) * h);
   for (let s = 0; s < SUB; s++) {
+    if (shakeT > 0) {
+      const env = Math.min(1, shakeT / 0.9) * 70, tt = t + s * h;
+      const sx = Math.sin(tt * 37) * env, sz = Math.cos(tt * 29) * env * 0.6, sy = Math.abs(Math.sin(tt * 23)) * env * 0.35;
+      for (let i = 0; i < NB; i++) { vel[i * 3] += sx * h; vel[i * 3 + 1] += sy * h; vel[i * 3 + 2] += sz * h; }
+    }
     for (let i = 0; i < NP; i++) {
       const o = i * 3;
       vel[o + 1] += GRAV * h;
@@ -1073,7 +1303,7 @@ const STICK_L = 2.6, STICK_R = 0.055, STICK_SEG = 16, STICK_RINGS = 14;
 const STICK_V = STICK_RINGS * (STICK_SEG + 1);
 const STICK_BASE = BODY_V + NK * TENT_V + 2 * EYE_V;
 const TOTAL_V = STICK_BASE + STICK_V;
-const FPV = 16;
+const FPV = 20;
 const vdata = new Float32Array(TOTAL_V * FPV);
 
 const indices = [];
@@ -1090,16 +1320,25 @@ const PLUSH_INDICES = indices.length;
 grid(STICK_BASE, STICK_RINGS - 1, STICK_SEG);
 const indexData = new Uint32Array(indices);
 
-const vbuf = device.createBuffer({ size: vdata.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+const vbuf = device.createBuffer({ size: vdata.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE });
+const occBufGPU = device.createBuffer({ size: TOTAL_V * 8, usage: GPUBufferUsage.STORAGE });
+const bindGroup = device.createBindGroup({ layout: renderBGL, entries: [
+  { binding: 0, resource: { buffer: uniformBuf } }, { binding: 1, resource: { buffer: occBufGPU } }] });
+const occBindGroup = device.createBindGroup({ layout: computeBGL, entries: [
+  { binding: 0, resource: { buffer: uniformBuf } }, { binding: 1, resource: { buffer: vbuf } }, { binding: 2, resource: { buffer: occBufGPU } }] });
+const FUR_INDICES = (LAT * LON + NK * (TR - 1) * RING) * 6;
+const fur = { on: true, pile: 0.048, shells: 24, mesh: false };
+const furShells = () => Math.round(fur.shells * (resScale < 0.8 ? 0.6 : 1));
+
 const ibuf = device.createBuffer({ size: indexData.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST });
 device.queue.writeBuffer(ibuf, 0, indexData);
 
 const F = 40;
 const floorV = new Float32Array([
-  -F, 0, -F, 3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-   F, 0, -F, 3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  -F, 0,  F, 3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-   F, 0,  F, 3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  -F, 0, -F, 3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+   F, 0, -F, 3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  -F, 0,  F, 3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+   F, 0,  F, 3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ]);
 const floorI = new Uint32Array([0, 2, 1, 1, 2, 3]);
 const fvbuf = device.createBuffer({ size: floorV.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
@@ -1134,6 +1373,20 @@ const skinW = new Float32Array(BODY_V * SK);
       for (let n = 0; n < SK; n++) skinW[v * SK + n] /= sum || 1;
     }
   }
+}
+// static fur data on the head: natural nap (down the surface, body-local) and a
+// shorter pile around the eyes and the embroidered smile so they stay readable
+const bodyNap = new Float32Array(BODY_V * 3);
+const bodyPile = new Float32Array(BODY_V);
+for (let v = 0; v < BODY_V; v++) {
+  const nx = bodyDir[v * 3], ny = bodyDir[v * 3 + 1], nz = bodyDir[v * 3 + 2];
+  bodyNap[v * 3] = nx * ny; bodyNap[v * 3 + 1] = ny * ny - 1; bodyNap[v * 3 + 2] = nz * ny;
+  const az = Math.atan2(nx, nz), el = Math.asin(clamp(ny, -1, 1));
+  let eye = Infinity;
+  for (const [ea, ee] of [[-0.34, 0.12], [0.34, 0.12]]) eye = Math.min(eye, Math.hypot((az - ea) * Math.cos(el), el - ee));
+  const hw = 0.115, cx = clamp(az, -hw, hw), kk = cx / hw, fy = -0.045 - 0.055 * (1 - kk * kk), sl = 0.11 * cx / (hw * hw);
+  const md = Math.sqrt((az - cx) ** 2 + (el - fy) ** 2 / (1 + sl * sl));
+  bodyPile[v] = Math.max(0.08, Math.min(smooth(0.1, 0.19, eye), smooth(0.018, 0.06, md)));
 }
 const resid = new Float32Array(NS * 3);
 // stroked pile, persistent: body in body-local space, tentacles in their pattern space
@@ -1191,7 +1444,16 @@ function buildBody() {
     vdata[o] = bodyP[v * 3]; vdata[o + 1] = bodyP[v * 3 + 1]; vdata[o + 2] = bodyP[v * 3 + 2]; vdata[o + 3] = 0;
     vdata[o + 4] = bodyN[v * 3]; vdata[o + 5] = bodyN[v * 3 + 1]; vdata[o + 6] = bodyN[v * 3 + 2]; vdata[o + 7] = 0;
     vdata[o + 8] = bodyDir[v * 3]; vdata[o + 9] = bodyDir[v * 3 + 1]; vdata[o + 10] = bodyDir[v * 3 + 2]; vdata[o + 11] = 0;
-    vdata[o + 12] = bodyBrush[v * 4]; vdata[o + 13] = bodyBrush[v * 4 + 1]; vdata[o + 14] = bodyBrush[v * 4 + 2]; vdata[o + 15] = bodyBrush[v * 4 + 3];
+    const ba = bodyBrush[v * 4 + 3];
+    vdata[o + 12] = bodyBrush[v * 4]; vdata[o + 13] = bodyBrush[v * 4 + 1]; vdata[o + 14] = bodyBrush[v * 4 + 2]; vdata[o + 15] = ba;
+    // strands lean with the nap, or along the last comb stroke where the pile was raised
+    const lx = bodyNap[v * 3] * 0.45 * (1 - ba) + bodyBrush[v * 4] * 0.95 * ba;
+    const ly = bodyNap[v * 3 + 1] * 0.45 * (1 - ba) + bodyBrush[v * 4 + 1] * 0.95 * ba;
+    const lz = bodyNap[v * 3 + 2] * 0.45 * (1 - ba) + bodyBrush[v * 4 + 2] * 0.95 * ba;
+    vdata[o + 16] = bodyR[0] * lx + bodyR[3] * ly + bodyR[6] * lz;
+    vdata[o + 17] = bodyR[1] * lx + bodyR[4] * ly + bodyR[7] * lz;
+    vdata[o + 18] = bodyR[2] * lx + bodyR[5] * ly + bodyR[8] * lz;
+    vdata[o + 19] = bodyPile[v];
   }
 }
 
@@ -1241,7 +1503,14 @@ function buildTentacle(k) {
       vdata[o + 4] = rx * ca + tx * sa; vdata[o + 5] = ry * ca + ty * sa; vdata[o + 6] = rz * ca + tz * sa; vdata[o + 7] = rad;
       vdata[o + 8] = s; vdata[o + 9] = th; vdata[o + 10] = k; vdata[o + 11] = 0;
       const bo = (k * TENT_V + r * (RING + 1) + q) * 4;
-      vdata[o + 12] = tentBrush[bo]; vdata[o + 13] = tentBrush[bo + 1]; vdata[o + 14] = tentBrush[bo + 2]; vdata[o + 15] = tentBrush[bo + 3];
+      const ba = tentBrush[bo + 3];
+      vdata[o + 12] = tentBrush[bo]; vdata[o + 13] = tentBrush[bo + 1]; vdata[o + 14] = tentBrush[bo + 2]; vdata[o + 15] = ba;
+      const da = tentBrush[bo], dr = -tentBrush[bo + 1] * sn + tentBrush[bo + 2] * c;
+      const ax = -sn * nx + c * bx, ay = -sn * ny + c * by, az = -sn * nz + c * bz;
+      vdata[o + 16] = tx * 0.45 * (1 - ba) + (da * tx + dr * ax) * 0.95 * ba;
+      vdata[o + 17] = ty * 0.45 * (1 - ba) + (da * ty + dr * ay) * 0.95 * ba;
+      vdata[o + 18] = tz * 0.45 * (1 - ba) + (da * tz + dr * az) * 0.95 * ba;
+      vdata[o + 19] = (1 - 0.2 * smooth(0.27, 0.2, Math.abs(th - 0.5))) * (0.3 + 0.7 * smooth(0.0, 0.08, s));
     }
   };
   for (let m = 0; m < TS; m++) {
@@ -1309,7 +1578,7 @@ function buildEyes() {
 
 function buildStick() {
   if (!stick.on) return;
-  const a = stick.dir, A = stick.tip, rs = STICK_R, L = STICK_L;
+  const a = stick.dir, A = stick.tip, rs = stick.r, L = stick.L, mat = stick.kind === 'finger' ? 5 : 4;
   stickFrame(a);
   for (let r = 0; r < STICK_RINGS; r++) {
     const half = STICK_RINGS / 2;
@@ -1320,7 +1589,7 @@ function buildStick() {
       const th = (q / STICK_SEG) * Math.PI * 2, c = Math.cos(th), sn = Math.sin(th);
       const rx = _e1[0] * c + _e2[0] * sn, ry = _e1[1] * c + _e2[1] * sn, rz = _e1[2] * c + _e2[2] * sn;
       const o = (STICK_BASE + r * (STICK_SEG + 1) + q) * FPV;
-      vdata[o] = A[0] + a[0] * x + rx * rad; vdata[o + 1] = A[1] + a[1] * x + ry * rad; vdata[o + 2] = A[2] + a[2] * x + rz * rad; vdata[o + 3] = 4;
+      vdata[o] = A[0] + a[0] * x + rx * rad; vdata[o + 1] = A[1] + a[1] * x + ry * rad; vdata[o + 2] = A[2] + a[2] * x + rz * rad; vdata[o + 3] = mat;
       vdata[o + 4] = rx * ca + a[0] * sa; vdata[o + 5] = ry * ca + a[1] * sa; vdata[o + 6] = rz * ca + a[2] * sa; vdata[o + 7] = 0;
       vdata[o + 8] = x; vdata[o + 9] = c; vdata[o + 10] = sn; vdata[o + 11] = 0;
     }
@@ -1535,36 +1804,63 @@ function aimStick(cx, cy) {
   if (Math.abs(den) < 1e-4) return;
   const t = ((P0[0] - ray.o[0]) * fwd[0] + (P0[1] - ray.o[1]) * fwd[1] + (P0[2] - ray.o[2]) * fwd[2]) / den;
   if (t <= 0) return;
-  stick.tipT = [clamp(ray.o[0] + ray.d[0] * t, -3.8, 3.8), clamp(ray.o[1] + ray.d[1] * t, STICK_R + 0.01, 5), clamp(ray.o[2] + ray.d[2] * t, -3.8, 3.8)];
+  stick.tipT = [clamp(ray.o[0] + ray.d[0] * t, -3.8, 3.8), clamp(ray.o[1] + ray.d[1] * t, stick.r + 0.01, 5), clamp(ray.o[2] + ray.d[2] * t, -3.8, 3.8)];
 }
 
 let tool = 'grab';
 const HINTS = {
-  grab: ['<b>Drag</b> to pull &amp; stretch', '<b>Flick</b> to throw', '<b>Tap</b> to squish', '<b>Drag background</b> to orbit', '<b>Scroll / pinch</b> to zoom'],
-  pet: ['<b>Stroke up</b> against the nap to raise the pile', '<b>Stroke down</b> (towards the tips) to smooth it back', '<b>Drag background</b> to orbit'],
-  stick: ['<b>Move</b> to steer the stick', '<b>Poke</b> to push the plush', 'Tentacles <b>cling</b> on contact', '<b>Shake hard</b> to make it let go'],
+  grab: ['Hand', 'Grab the head or an arm to pull and stretch it. Flick to throw, tap to squish. Drag the background to look around.'],
+  finger: ['Finger', 'Press on an arm and hold. The arms curl round your finger and hang on; drag to lead it, lift to let go.'],
+  pet: ['Comb', 'Stroke the fur to lay the pile the way you brush. Against the grain it turns darker; with it, it lies flat again. Smooth fur puts it all back.'],
+  stick: ['Stick', 'Steer the stick with the pointer and poke the plush. Arms that touch it cling on; shake hard to make them let go.'],
 };
+let fingerId = null, fingerPlane = null;
 function setTool(t) {
   tool = t;
   document.querySelectorAll('.tool').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === t)));
-  document.getElementById('hints').innerHTML = HINTS[t].map((h) => `<span>${h}</span>`).join('');
+  document.getElementById('hintTool').textContent = HINTS[t][0];
+  document.getElementById('hintText').textContent = HINTS[t][1];
   canvas.classList.toggle('stickmode', t === 'stick');
   canvas.classList.toggle('petmode', t === 'pet');
-  grabs.clear(); pets.clear();
-  if (t === 'stick' && !stick.on) {
-    stick.on = true;
+  grabs.clear(); pets.clear(); fingerId = null;
+  stick.on = false; attached.clear();
+  if (t === 'stick') {
+    Object.assign(stick, { on: true, kind: 'stick', L: 2.6, r: 0.055 });
     stick.tipT = [bodyO[0] + right[0] * 2.1, Math.max(1.2, bodyO[1] + 0.5), bodyO[2] + right[2] * 2.1];
     stick.tip = stick.tipT.slice(); stick.prevTip = stick.tip.slice();
-  } else if (t !== 'stick') { stick.on = false; attached.clear(); }
+  }
 }
 document.querySelectorAll('.tool').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
-window.addEventListener('keydown', (e) => { const t = { 1: 'grab', 2: 'pet', 3: 'stick' }[e.key]; if (t && !e.metaKey && !e.ctrlKey) setTool(t); });
+window.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement) return;
+  const t = { 1: 'grab', 2: 'finger', 3: 'pet', 4: 'stick' }[e.key];
+  if (t && !e.metaKey && !e.ctrlKey) setTool(t);
+});
+function fingerTarget(cx, cy) {
+  const ray = rayFrom(cx, cy), n = fingerPlane;
+  const den = n[0] * ray.d[0] + n[1] * ray.d[1] + n[2] * ray.d[2];
+  if (Math.abs(den) < 1e-5) return;
+  const t = -(n[0] * ray.o[0] + n[1] * ray.o[1] + n[2] * ray.o[2] + n[3]) / den;
+  if (t > 0) stick.tipT = [clamp(ray.o[0] + ray.d[0] * t, -3.8, 3.8), Math.max(ray.o[1] + ray.d[1] * t, 0.1), clamp(ray.o[2] + ray.d[2] * t, -3.8, 3.8)];
+}
 
 canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now() });
   if (tool === 'stick') { aimStick(e.clientX, e.clientY); return; }
   const hit = pick(rayFrom(e.clientX, e.clientY));
+  if (hit && tool === 'finger' && fingerId === null) {
+    // the fingertip lands a little into the fur and the arms close around it
+    const T = hit.hit, rd = rayFrom(e.clientX, e.clientY).d;
+    fingerId = e.pointerId;
+    fingerPlane = [fwd[0], fwd[1], fwd[2], -(fwd[0] * T[0] + fwd[1] * T[1] + fwd[2] * T[2])];
+    Object.assign(stick, { on: true, kind: 'finger', L: 0.9, r: 0.085 });
+    stick.tipT = [T[0] + rd[0] * 0.05, T[1] + rd[1] * 0.05, T[2] + rd[2] * 0.05];
+    stick.tip = stick.tipT.slice(); stick.prevTip = stick.tip.slice();
+    attached.clear();
+    canvas.classList.add('grabbing');
+    return;
+  }
   if (hit && tool === 'pet') { pets.set(e.pointerId, { last: hit.hit, kind: hit.kind, k: hit.k }); return; }
   if (hit) { startGrab(e.pointerId, hit); canvas.classList.add('grabbing'); return; }
   pinch.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1575,6 +1871,7 @@ canvas.addEventListener('pointermove', (e) => {
   const p = pointers.get(e.pointerId);
   if (p) { p.x = e.clientX; p.y = e.clientY; }
   if (tool === 'stick') { if (e.pointerType === 'mouse' || p) aimStick(e.clientX, e.clientY); return; }
+  if (e.pointerId === fingerId) { fingerTarget(e.clientX, e.clientY); return; }
   const pt = pets.get(e.pointerId);
   if (pt) {
     const hit = pick(rayFrom(e.clientX, e.clientY));
@@ -1604,6 +1901,7 @@ const endPointer = (e) => {
   const p = pointers.get(e.pointerId);
   pointers.delete(e.pointerId);
   pets.delete(e.pointerId);
+  if (e.pointerId === fingerId) { fingerId = null; stick.on = false; attached.clear(); }
   const g = grabs.get(e.pointerId);
   if (g) {
     grabs.delete(e.pointerId);
@@ -1625,23 +1923,100 @@ canvas.addEventListener('wheel', (e) => { e.preventDefault(); cam.tDist *= Math.
 //  UI
 // =====================================================================
 const PALETTES = {
-  coral: { body: [0.92, 0.26, 0.17], under: [1.0, 0.58, 0.45], blush: 1 },
-  lilac: { body: [0.45, 0.33, 0.72], under: [0.86, 0.76, 0.95], blush: 0.8 },
-  mint:  { body: [0.25, 0.60, 0.46], under: [0.80, 0.94, 0.84], blush: 0.9 },
+  coral:  { body: [0.92, 0.26, 0.17], under: [1.0, 0.86, 0.78], blush: 1 },
+  lilac:  { body: [0.42, 0.30, 0.70], under: [0.93, 0.90, 1.0], blush: 0.8 },
+  lagoon: { body: [0.075, 0.29, 0.29], under: [0.93, 0.94, 0.91], blush: 0.55 },
 };
-let palette = PALETTES.coral;
+let palette = PALETTES.lagoon;
 const target = { body: palette.body.slice(), under: palette.under.slice() };
-document.querySelectorAll('.swatch').forEach((b) => b.addEventListener('click', () => {
-  document.querySelectorAll('.swatch').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+document.querySelectorAll('.sw').forEach((b) => b.addEventListener('click', () => {
+  document.querySelectorAll('.sw').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
   palette = PALETTES[b.dataset.c];
 }));
-document.getElementById('reset').addEventListener('click', () => {
+const $ = (id) => document.getElementById(id);
+const bindSlider = (id, fmt, apply) => {
+  const el = $(id), out = $(id + 'V');
+  const upd = () => { const v = parseFloat(el.value); out.textContent = fmt(v); apply(v); };
+  el.addEventListener('input', upd); upd();
+};
+bindSlider('stuff', (v) => v.toFixed(2), (v) => { matl.stuff = v; });
+bindSlider('pile', (v) => `${v} mm`, (v) => { fur.pile = v * 0.0068; });
+bindSlider('damp', (v) => v.toFixed(2), (v) => { matl.damp = v; });
+const kick = () => { blinkT = 0.0001; nextBlink = 3 + Math.random() * 3; };
+$('shake').addEventListener('click', () => { shakeT = 0.9; kick(); });
+$('squish').addEventListener('click', () => {
+  for (let i = 0; i < NB; i++) {
+    const ly = bodyR[3] * (pos[i * 3] - bodyO[0]) + bodyR[4] * (pos[i * 3 + 1] - bodyO[1]) + bodyR[5] * (pos[i * 3 + 2] - bodyO[2]);
+    if (ly > -0.1) vel[i * 3 + 1] -= 4 + 5 * Math.max(0, ly);
+  }
+  kick();
+});
+$('toss').addEventListener('click', () => {
+  const a = Math.random() * Math.PI * 2, wx = Math.cos(a) * 5, wz = Math.sin(a) * 5;
+  for (let i = 0; i < NP; i++) {
+    const rx = pos[i * 3] - bodyO[0], ry = pos[i * 3 + 1] - bodyO[1], rz = pos[i * 3 + 2] - bodyO[2];
+    vel[i * 3] += -bodyO[0] * 0.8 + (0 * rz - wz * ry);
+    vel[i * 3 + 1] += 9.5 + (wz * rx - wx * rz);
+    vel[i * 3 + 2] += -bodyO[2] * 0.8 + (wx * ry - 0 * rx);
+  }
+  kick();
+});
+$('smooth').addEventListener('click', () => { bodyBrush.fill(0); tentBrush.fill(0); });
+$('reset').addEventListener('click', () => {
   resetSim(1.3);
   bodyBrush.fill(0); tentBrush.fill(0);
-  if (stick.on) { stick.tipT = [bodyO[0] + right[0] * 2.1, 1.2, bodyO[2] + right[2] * 2.1]; }
+  setTool(tool);
   cam.tYaw = 0.32; cam.tPitch = 0.42; cam.tDist = 7.2; cam.vYaw = cam.vPitch = 0;
 });
-const statEl = document.getElementById('stat');
+let timeScale = 1, paused = false;
+$('half').addEventListener('change', (e) => { timeScale = e.target.checked ? 0.5 : 1; });
+$('mesh').addEventListener('change', (e) => { fur.mesh = e.target.checked; });
+$('pause').addEventListener('click', (e) => {
+  paused = !paused;
+  e.currentTarget.setAttribute('aria-pressed', String(paused));
+  e.currentTarget.textContent = paused ? 'Resume' : 'Pause';
+});
+$('insideBtn').addEventListener('click', (e) => {
+  const open = $('insidePanel').hidden;
+  $('insidePanel').hidden = !open;
+  e.currentTarget.setAttribute('aria-expanded', String(open));
+  $('insideArrow').textContent = open ? '▴' : '▾';
+});
+$('panelToggle').addEventListener('click', (e) => {
+  const open = !$('panel').classList.contains('open');
+  $('panel').classList.toggle('open', open);
+  e.currentTarget.setAttribute('aria-expanded', String(open));
+});
+
+// ---- live readouts
+const sVol = $('sVol'), sKin = $('sKin'), sHold = $('sHold'), foot = $('foot');
+let restVol = 0, statT = 0;
+function bodyVolume() {
+  let v = 0;
+  const W = LON + 1;
+  for (let i = 0; i < LAT; i++) for (let j = 0; j < LON; j++) {
+    const a = (i * W + j) * 3, b = a + 3, c = a + W * 3, d = c + 3;
+    for (const [p, q, r] of [[a, c, b], [b, c, d]]) {
+      v += bodyP[p] * (bodyP[q + 1] * bodyP[r + 2] - bodyP[q + 2] * bodyP[r + 1])
+         - bodyP[p + 1] * (bodyP[q] * bodyP[r + 2] - bodyP[q + 2] * bodyP[r])
+         + bodyP[p + 2] * (bodyP[q] * bodyP[r + 1] - bodyP[q + 1] * bodyP[r]);
+    }
+  }
+  return Math.abs(v) / 6;
+}
+function updateStats(dt) {
+  statT += dt;
+  if (statT < 0.12) return;
+  statT = 0;
+  const vol = bodyVolume();
+  if (!restVol) restVol = (4 / 3) * Math.PI * RX * RZ * (RYT + RYB) / 2;
+  let e = 0;
+  for (let o = 0; o < NP * 3; o += 3) e += vel[o] * vel[o] + vel[o + 1] * vel[o + 1] + vel[o + 2] * vel[o + 2];
+  const mJ = 0.5 * (0.08 / NP) * e * 0.06 * 0.06 * 1000;
+  sVol.firstChild.textContent = (100 * vol / restVol).toFixed(1);
+  sKin.firstChild.textContent = mJ.toFixed(2);
+  sHold.firstChild.textContent = String(attached.size);
+}
 setTool('grab');
 
 // =====================================================================
@@ -1665,7 +2040,7 @@ function ensureTargets() {
   depthTex = device.createTexture({ size: [w, h], sampleCount: SAMPLES, format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT });
 }
 
-const BG = [0.945, 0.914, 0.890];
+const BG = [0.914, 0.902, 0.890];
 const norm3 = (v) => { const l = Math.hypot(...v); return [v[0] / l, v[1] / l, v[2] / l]; };
 const KEY = norm3([-0.55, 1.0, 0.62]), FILL = norm3([0.85, 0.35, 0.55]), RIM = norm3([0.15, 0.55, -1.0]);
 
@@ -1679,15 +2054,16 @@ function writeUniforms(t) {
   u.set([...target.body, 1], 32); u.set([...target.under, 1], 36); u.set([...BG, 1], 40);
   // shadow / occlusion proxies
   let n = 0;
-  const sp = (x, y, z, r) => { u[52 + n * 4] = x; u[53 + n * 4] = y; u[54 + n * 4] = z; u[55 + n * 4] = r; n++; };
+  const sp = (x, y, z, r) => { u[56 + n * 4] = x; u[57 + n * 4] = y; u[58 + n * 4] = z; u[59 + n * 4] = r; n++; };
   sp(bodyO[0], bodyO[1] + 0.05, bodyO[2], 0.9);
   for (let k2 = 0; k2 < NK; k2++) for (let j = 3; j < NT; j += 2) { const i = tid(k2, j); sp(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], radius[i] * 0.95); }
   u.set([t, n, palette.blush * (1 + happy * 0.9), 0.46], 44);
   let bx = 0, by = 0, bz = 0, br = 0;
-  for (let q = 0; q < n; q++) { bx += u[52 + q * 4]; by += u[53 + q * 4]; bz += u[54 + q * 4]; }
+  for (let q = 0; q < n; q++) { bx += u[56 + q * 4]; by += u[57 + q * 4]; bz += u[58 + q * 4]; }
   bx /= n; by /= n; bz /= n;
-  for (let q = 0; q < n; q++) br = Math.max(br, Math.hypot(u[52 + q * 4] - bx, u[53 + q * 4] - by, u[54 + q * 4] - bz) + u[55 + q * 4]);
+  for (let q = 0; q < n; q++) br = Math.max(br, Math.hypot(u[56 + q * 4] - bx, u[57 + q * 4] - by, u[58 + q * 4] - bz) + u[59 + q * 4]);
   u[48] = bx; u[49] = by; u[50] = bz; u[51] = br;
+  u[52] = fur.on && !fur.mesh ? 1 : 0; u[53] = fur.pile; u[54] = furShells(); u[55] = fur.mesh ? 1 : 0;
   device.queue.writeBuffer(uniformBuf, 0, u);
 }
 
@@ -1697,7 +2073,7 @@ function frame(now) {
   const dt = clamp((now - last) / 1000, 1 / 240, 1 / 30);
   last = now; simT += dt;
   fpsAcc += dt; fpsN++;
-  if (fpsAcc > 0.5) { statEl.textContent = `${Math.round(fpsN / fpsAcc)} fps · ${NP} particles`; fpsAcc = 0; fpsN = 0; }
+  if (fpsAcc > 0.5) { foot.textContent = `Simulation scale: 1 unit ≈ 6 cm, a 25 cm plush. ${NP} particles, ${furShells()} fur shells, ${Math.round(fpsN / fpsAcc)} fps.`; fpsAcc = 0; fpsN = 0; }
 
   // blinking
   nextBlink -= dt;
@@ -1707,17 +2083,24 @@ function frame(now) {
   adaptResolution((now - prevNow) / 1000); prevNow = now;
   happy *= Math.exp(-0.9 * dt);
   ensureTargets();
+  const sdt = paused ? 0 : dt * timeScale;
+  if (shakeT > 0) shakeT -= sdt;
   stickFrameUpdate(dt);
-  step(dt, simT);
+  if (sdt > 0) step(sdt, simT);
   updateCamera(dt);
   buildBody();
   for (let k = 0; k < NK; k++) buildTentacle(k);
   buildEyes();
   buildStick();
+  updateStats(dt);
   device.queue.writeBuffer(vbuf, 0, vdata);
   writeUniforms(simT);
 
   const enc = device.createCommandEncoder();
+  const cp = enc.beginComputePass();
+  cp.setPipeline(occPipeline); cp.setBindGroup(0, occBindGroup);
+  cp.dispatchWorkgroups(Math.ceil(TOTAL_V / 64));
+  cp.end();
   const pass = enc.beginRenderPass({
     colorAttachments: [{ view: msaaTex.createView(), resolveTarget: context.getCurrentTexture().createView(),
       clearValue: { r: BG[0], g: BG[1], b: BG[2], a: 1 }, loadOp: 'clear', storeOp: 'discard' }],
@@ -1726,6 +2109,11 @@ function frame(now) {
   pass.setPipeline(pipeline);
   pass.setBindGroup(0, bindGroup);
   pass.setVertexBuffer(0, vbuf); pass.setIndexBuffer(ibuf, 'uint32'); pass.drawIndexed(stick.on ? indexData.length : PLUSH_INDICES);
+  if (fur.on && !fur.mesh) {
+    pass.setPipeline(furPipeline);
+    pass.drawIndexed(FUR_INDICES, furShells());
+    pass.setPipeline(pipeline);
+  }
   pass.setVertexBuffer(0, fvbuf); pass.setIndexBuffer(fibuf, 'uint32'); pass.drawIndexed(6);
   pass.end();
   device.queue.submit([enc.finish()]);
