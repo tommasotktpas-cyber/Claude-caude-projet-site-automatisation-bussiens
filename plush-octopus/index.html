@@ -169,10 +169,10 @@ fn tentRadius(s : f32) -> f32 { return 0.052 + 0.17 * pow(1.0 - s, 1.1); }
 
 // Pile that has been stroked lies down along the stroke: long streaks follow the
 // stroke direction, the isotropic fuzz flattens and the colour deepens a little.
-struct Brushed { h : f32, dark : f32, flat : f32 };
+struct Brushed { h : f32, dark : vec3f, flat : f32 };
 fn brushed(p : vec3f, brush : vec4f, px : f32) -> Brushed {
   var o : Brushed;
-  o.h = 0.0; o.dark = 1.0; o.flat = 1.0;
+  o.h = 0.0; o.dark = vec3f(1.0); o.flat = 1.0;
   let a = clamp(brush.w, 0.0, 1.0);
   if (a < 0.002) { return o; }
   let D = normalize(brush.xyz + vec3f(1e-6, 0.0, 0.0));
@@ -182,7 +182,8 @@ fn brushed(p : vec3f, brush : vec4f, px : f32) -> Brushed {
   let s1 = noise3(q2) - 0.5;
   let s2 = noise3(q2 * 2.3 + vec3f(3.1)) - 0.5;
   o.h = (s1 * 0.0045 + s2 * 0.0018) * a * fa;
-  o.dark = 1.0 - (0.15 + 0.08 * s1) * a;
+  // raised pile shows the deeper, richer colour of the fibres' shadowed flanks
+  o.dark = clamp(vec3f(1.0) - (0.2 + 0.05 * s1) * a * vec3f(1.0, 1.32, 1.26), vec3f(0.5), vec3f(1.0));
   o.flat = 1.0 - 0.65 * a;
   return o;
 }
@@ -246,7 +247,7 @@ fn bodyPat(rest : vec3f, px : f32, brush : vec4f) -> Pat {
   let f = fuzz(n * 1.0, px) * br.flat;
   h += (f.x + br.h) * (1.0 - inside);
   col *= 1.0 + f.y * 0.07;
-  col *= mix(1.0, br.dark, 1.0 - inside);
+  col *= mix(vec3f(1.0), br.dark, 1.0 - inside);
 
   o.h = h; o.col = col; o.sheen = (1.0 - inside) * (1.0 - 0.3 * brush.w); o.thread = inside;
   return o;
@@ -1425,8 +1426,17 @@ function boop(hit, dir) {
 
 // ---------------------------------------------------------------- petting
 const pets = new Map(); // pointerId -> { last, kind, k }
-function blendBrush(arr, o, dx, dy, dz, w) {
+// Plush has a nap: stroking with it (down the head, towards the tentacle tips)
+// lays the pile flat again; stroking against it raises the pile, which reads darker.
+function blendBrush(arr, o, dx, dy, dz, w, gx, gy, gz) {
+  const sl = Math.hypot(dx, dy, dz);
+  if (sl < 1e-6) return;
+  dx /= sl; dy /= sl; dz /= sl;
+  const gl = Math.hypot(gx, gy, gz);
+  const along = gl > 0.2 ? (dx * gx + dy * gy + dz * gz) / gl : 0;
   const a = arr[o + 3];
+  if (along > 0.35) { arr[o + 3] = Math.max(0, a - w * 1.6 * along); return; }
+  w *= 1 - Math.max(0, along);
   let x = arr[o] * a * (1 - w) + dx * w, y = arr[o + 1] * a * (1 - w) + dy * w, z = arr[o + 2] * a * (1 - w) + dz * w;
   const l = Math.hypot(x, y, z);
   if (l < 1e-6) return;
@@ -1443,12 +1453,12 @@ function stroke(from, hit) {
   const R = bodyR;
   if (hit.kind === 'body') {
     const lx = R[0] * dx + R[1] * dy + R[2] * dz, ly = R[3] * dx + R[4] * dy + R[5] * dz, lz = R[6] * dx + R[7] * dy + R[8] * dz;
-    const RAD = 0.3;
+    const RAD = 0.34;
     for (let v = 0; v < BODY_V; v++) {
       const d = Math.hypot(bodyP[v * 3] - hp[0], bodyP[v * 3 + 1] - hp[1], bodyP[v * 3 + 2] - hp[2]);
       if (d >= RAD) continue;
       const nx = bodyDir[v * 3], ny = bodyDir[v * 3 + 1], nz = bodyDir[v * 3 + 2], dn = lx * nx + ly * ny + lz * nz;
-      blendBrush(bodyBrush, v * 4, lx - nx * dn, ly - ny * dn, lz - nz * dn, (1 - d / RAD) ** 2 * strength);
+      blendBrush(bodyBrush, v * 4, lx - nx * dn, ly - ny * dn, lz - nz * dn, (1 - d / RAD) ** 2 * strength, nx * ny, ny * ny - 1, nz * ny);
     }
     const ix = hp[0] - bodyO[0], iy = hp[1] - bodyO[1], iz = hp[2] - bodyO[2], il = Math.hypot(ix, iy, iz) || 1;
     for (let i = 0; i < NS; i++) {
@@ -1467,7 +1477,7 @@ function stroke(from, hit) {
         const an = (q / RING) * Math.PI * 2, c = Math.cos(an), sn = Math.sin(an);
         const ax = -sn * tFrame[fo + 3] + c * tFrame[fo + 6], ay = -sn * tFrame[fo + 4] + c * tFrame[fo + 7], az = -sn * tFrame[fo + 5] + c * tFrame[fo + 8];
         const da = dx * tFrame[fo] + dy * tFrame[fo + 1] + dz * tFrame[fo + 2], dr = dx * ax + dy * ay + dz * az;
-        blendBrush(tentBrush, (k * TENT_V + r * (RING + 1) + q) * 4, da, -dr * sn, dr * c, (1 - d / RAD) ** 2 * strength);
+        blendBrush(tentBrush, (k * TENT_V + r * (RING + 1) + q) * 4, da, -dr * sn, dr * c, (1 - d / RAD) ** 2 * strength, 1, 0, 0);
       }
     }
     for (let j = 2; j < NT; j++) {
@@ -1494,7 +1504,7 @@ function aimStick(cx, cy) {
 let tool = 'grab';
 const HINTS = {
   grab: ['<b>Drag</b> to pull &amp; stretch', '<b>Flick</b> to throw', '<b>Tap</b> to squish', '<b>Drag background</b> to orbit', '<b>Scroll / pinch</b> to zoom'],
-  pet: ['<b>Stroke</b> the fur to brush it', 'Brushed pile lies down and turns a shade darker', '<b>Drag background</b> to orbit', '<b>Reset</b> combs it smooth'],
+  pet: ['<b>Stroke up</b> against the nap to raise the pile', '<b>Stroke down</b> (towards the tips) to smooth it back', '<b>Drag background</b> to orbit'],
   stick: ['<b>Move</b> to steer the stick', '<b>Poke</b> to push the plush', 'Tentacles <b>cling</b> on contact', '<b>Shake hard</b> to make it let go'],
 };
 function setTool(t) {
